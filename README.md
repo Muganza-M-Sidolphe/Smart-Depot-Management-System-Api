@@ -2,6 +2,7 @@
 
 Python backend for the Smart Depot Management System, built with FastAPI and SQLAlchemy.
 It is designed to serve the existing Next.js frontend in `../Smart-Depot-Management-System`.
+This supports sellers who want to dynamically manage depot inventory, sales, customers, expenses, and returns.
 
 ## Setup
 
