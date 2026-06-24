@@ -1,0 +1,402 @@
+from datetime import datetime, timedelta
+from typing import Any, TypeVar
+
+from fastapi import HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.models.business import (
+    Activity,
+    Customer,
+    DamagedCase,
+    EmptyCaseTransaction,
+    Expense,
+    Notification,
+    Product,
+    Sale,
+    SaleItem,
+    Supplier,
+    SupplierReturn,
+    TransactionAudit,
+    User,
+    utcnow,
+)
+from app.schemas import business as schema
+
+ModelT = TypeVar("ModelT")
+
+
+def list_records(db: Session, model: type[ModelT]) -> list[ModelT]:
+    return list(db.scalars(select(model).order_by(model.id.desc())))  # type: ignore[attr-defined]
+
+
+def get_record(db: Session, model: type[ModelT], record_id: int) -> ModelT | None:
+    return db.get(model, record_id)
+
+
+def create_record(db: Session, model: type[ModelT], payload: Any) -> ModelT:
+    record = model(**payload.model_dump())  # type: ignore[call-arg]
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def update_record(db: Session, model: type[ModelT], record_id: int, payload: Any) -> ModelT | None:
+    record = get_record(db, model, record_id)
+    if record is None:
+        return None
+
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(record, key, value)
+    if hasattr(record, "updated_at"):
+        setattr(record, "updated_at", utcnow())
+
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def delete_record(db: Session, model: type[ModelT], record_id: int) -> bool:
+    record = get_record(db, model, record_id)
+    if record is None:
+        return False
+    db.delete(record)
+    db.commit()
+    return True
+
+
+def create_activity(db: Session, activity_type: str, message: str) -> Activity:
+    activity = Activity(type=activity_type, message=message)
+    db.add(activity)
+    return activity
+
+
+def create_audit(
+    db: Session,
+    transaction_id: int,
+    transaction_type: str,
+    action: str,
+    performed_by: str,
+    previous_state: dict[str, Any] | None = None,
+    new_state: dict[str, Any] | None = None,
+    notes: str | None = None,
+) -> TransactionAudit:
+    audit = TransactionAudit(
+        transaction_id=transaction_id,
+        transaction_type=transaction_type,
+        action=action,
+        previous_state=previous_state,
+        new_state=new_state,
+        performed_by=performed_by,
+        notes=notes,
+    )
+    db.add(audit)
+    return audit
+
+
+def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
+    if not payload.items:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sale must include at least one item")
+
+    products_by_id: dict[int, Product] = {}
+    for item in payload.items:
+        product = db.get(Product, item.product_id)
+        if product is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Product {item.product_id} not found")
+        if product.full_cases < item.quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient stock for {product.name}",
+            )
+        products_by_id[item.product_id] = product
+
+    sale_count = db.scalar(select(func.count(Sale.id))) or 0
+    subtotal = 0.0
+    expected_empties = 0
+    total_deposit_value = 0.0
+
+    sale = Sale(
+        receipt_no=f"RCP-{1001 + sale_count}",
+        customer_id=payload.customer_id,
+        customer_name=payload.customer_name,
+        subtotal=0,
+        discount=payload.discount,
+        total=0,
+        payment=payload.payment,
+        amount_paid=payload.amount_paid,
+        change=0,
+        cashier=payload.cashier,
+        payment_method=payload.payment,
+        expected_empties=0,
+        returned_empties=0,
+        invoice_number=f"INV-{1001 + sale_count}",
+        status="completed",
+    )
+    db.add(sale)
+    db.flush()
+
+    for item in payload.items:
+        product = products_by_id[item.product_id]
+        unit_price = item.unit_price if item.unit_price is not None else product.selling_price
+        line_subtotal = item.quantity * unit_price
+        subtotal += line_subtotal
+        expected_empties += item.quantity
+        total_deposit_value += item.quantity * product.deposit_amount
+        product.full_cases -= item.quantity
+
+        db.add(
+            SaleItem(
+                sale_id=sale.id,
+                product_id=product.id,
+                name=item.name or product.name,
+                quantity=item.quantity,
+                unit_price=unit_price,
+                subtotal=line_subtotal,
+            )
+        )
+
+        db.add(
+            EmptyCaseTransaction(
+                product_id=product.id,
+                customer_id=payload.customer_id,
+                customer_name=payload.customer_name,
+                transaction_type="sale",
+                total_quantity=item.quantity,
+                returned_quantity=0,
+                pending_quantity=item.quantity,
+                deposit_amount=product.deposit_amount,
+                total_deposit_value=item.quantity * product.deposit_amount,
+                refunded_amount=0,
+                expected_return_date=utcnow() + timedelta(days=7),
+                product_name=product.name,
+                status="pending",
+                created_by=payload.cashier,
+            )
+        )
+
+    total = max(0.0, subtotal - payload.discount)
+    sale.subtotal = subtotal
+    sale.total = total
+    sale.change = max(0.0, payload.amount_paid - total)
+    sale.expected_empties = expected_empties
+
+    if payload.customer_id is not None:
+        customer = db.get(Customer, payload.customer_id)
+        if customer is not None:
+            customer.pending_empties += expected_empties
+            customer.total_purchases += total
+            customer.total_spent += total
+            customer.refundable_deposits += total_deposit_value
+            customer.total_transactions += 1
+            customer.updated_at = utcnow()
+
+    create_activity(db, "sale", f"{payload.cashier} sold {expected_empties} cases to {payload.customer_name}")
+    db.commit()
+    return get_sale(db, sale.id)  # type: ignore[return-value]
+
+
+def get_sale(db: Session, sale_id: int) -> Sale | None:
+    return db.scalars(
+        select(Sale).options(selectinload(Sale.items)).where(Sale.id == sale_id)
+    ).first()
+
+
+def list_sales(db: Session) -> list[Sale]:
+    return list(db.scalars(select(Sale).options(selectinload(Sale.items)).order_by(Sale.id.desc())))
+
+
+def create_empty_case_transaction(
+    db: Session,
+    payload: schema.EmptyCaseTransactionCreate,
+) -> EmptyCaseTransaction:
+    transaction = EmptyCaseTransaction(**payload.model_dump())
+    db.add(transaction)
+    db.flush()
+    create_audit(
+        db,
+        transaction_id=transaction.id,
+        transaction_type="empty_case",
+        action="created",
+        performed_by=payload.created_by,
+        new_state={"status": payload.status},
+        notes="Initial transaction created",
+    )
+    create_activity(db, "empty", f"Empty case transaction created for {payload.customer_name or 'Unknown'}")
+    db.commit()
+    db.refresh(transaction)
+    return transaction
+
+
+def process_empty_case_return(
+    db: Session,
+    transaction_id: int,
+    payload: schema.EmptyCaseReturnRequest,
+) -> EmptyCaseTransaction | None:
+    transaction = db.get(EmptyCaseTransaction, transaction_id)
+    if transaction is None:
+        return None
+    if payload.return_quantity > transaction.pending_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Return quantity cannot exceed pending quantity",
+        )
+
+    previous_state = {
+        "status": transaction.status,
+        "returnedQuantity": transaction.returned_quantity,
+        "pendingQuantity": transaction.pending_quantity,
+    }
+    transaction.returned_quantity += payload.return_quantity
+    transaction.pending_quantity -= payload.return_quantity
+    transaction.refunded_amount += payload.return_quantity * transaction.deposit_amount
+    transaction.status = "completed" if transaction.pending_quantity == 0 else "partial"
+    transaction.actual_return_date = utcnow() if transaction.pending_quantity == 0 else transaction.actual_return_date
+    transaction.updated_at = utcnow()
+
+    if transaction.customer_id is not None:
+        customer = db.get(Customer, transaction.customer_id)
+        if customer is not None:
+            refund = payload.return_quantity * transaction.deposit_amount
+            customer.pending_empties = max(0, customer.pending_empties - payload.return_quantity)
+            customer.refundable_deposits = max(0, customer.refundable_deposits - refund)
+            customer.updated_at = utcnow()
+
+    create_audit(
+        db,
+        transaction_id=transaction.id,
+        transaction_type="empty_case",
+        action="updated",
+        performed_by=payload.processed_by,
+        previous_state=previous_state,
+        new_state={
+            "status": transaction.status,
+            "returnedQuantity": transaction.returned_quantity,
+            "pendingQuantity": transaction.pending_quantity,
+        },
+        notes=f"Processed return of {payload.return_quantity} cases",
+    )
+    create_activity(
+        db,
+        "empty",
+        f"{payload.processed_by} processed {payload.return_quantity} empty case return from {transaction.customer_name or 'Unknown'}",
+    )
+    db.commit()
+    db.refresh(transaction)
+    return transaction
+
+
+def add_supplier_return(db: Session, payload: schema.SupplierReturnCreate) -> SupplierReturn:
+    supplier_return = SupplierReturn(**payload.model_dump())
+    db.add(supplier_return)
+    db.flush()
+    create_audit(
+        db,
+        transaction_id=supplier_return.id,
+        transaction_type="supplier_return",
+        action="created",
+        performed_by=payload.received_by,
+        new_state={"quantity": payload.quantity},
+        notes="Supplier return recorded",
+    )
+    create_activity(
+        db,
+        "empty",
+        f"{payload.received_by} returned {payload.quantity} cases to {payload.supplier_name}",
+    )
+    db.commit()
+    db.refresh(supplier_return)
+    return supplier_return
+
+
+def add_damaged_case(db: Session, payload: schema.DamagedCaseCreate) -> DamagedCase:
+    damaged_case = DamagedCase(**payload.model_dump())
+    db.add(damaged_case)
+    db.flush()
+    create_audit(
+        db,
+        transaction_id=damaged_case.id,
+        transaction_type="damage_report",
+        action="created",
+        performed_by=payload.reported_by,
+        new_state={"quantity": payload.quantity, "damageCost": payload.damage_cost},
+        notes="Damaged case reported",
+    )
+    create_activity(
+        db,
+        "empty",
+        f"{payload.reported_by} reported {payload.quantity} damaged cases of {payload.product_name}",
+    )
+    db.commit()
+    db.refresh(damaged_case)
+    return damaged_case
+
+
+def mark_notifications_read(db: Session) -> list[Notification]:
+    notifications = list_records(db, Notification)
+    for notification in notifications:
+        notification.read = 1
+    db.commit()
+    return notifications
+
+
+def generate_notifications(db: Session) -> list[Notification]:
+    now = utcnow()
+    created: list[Notification] = []
+    products = list(db.scalars(select(Product)))
+    overdue_count = db.scalar(
+        select(func.count(EmptyCaseTransaction.id)).where(
+            EmptyCaseTransaction.status.in_(["pending", "partial"]),
+            EmptyCaseTransaction.expected_return_date < now,
+        )
+    ) or 0
+
+    low_stock = [p for p in products if p.full_cases <= p.low_stock_threshold]
+    expiring = [p for p in products if now <= p.expiry_date <= now + timedelta(days=30)]
+    expired = [p for p in products if p.expiry_date < now]
+
+    specs = []
+    if low_stock:
+        specs.append(("warning", "Low stock", f"{len(low_stock)} products are below threshold"))
+    if expiring:
+        specs.append(("warning", "Expiring soon", f"{len(expiring)} products expire within 30 days"))
+    if expired:
+        specs.append(("urgent", "Expired product", f"{len(expired)} products are expired"))
+    if overdue_count:
+        specs.append(("urgent", "Overdue returns", f"{overdue_count} empty case returns are overdue"))
+
+    for level, title, message in specs:
+        notification = Notification(level=level, title=title, message=message, read=0)
+        db.add(notification)
+        created.append(notification)
+    db.commit()
+    for notification in created:
+        db.refresh(notification)
+    return created
+
+
+def dashboard_report(db: Session) -> schema.DashboardReport:
+    now = utcnow()
+    products = list(db.scalars(select(Product)))
+    activities = list(db.scalars(select(Activity).order_by(Activity.id.desc()).limit(10)))
+    sales_revenue = db.scalar(select(func.coalesce(func.sum(Sale.total), 0.0))) or 0.0
+    total_expenses = db.scalar(select(func.coalesce(func.sum(Expense.amount), 0.0))) or 0.0
+    pending_empty_cases = db.scalar(
+        select(func.coalesce(func.sum(EmptyCaseTransaction.pending_quantity), 0))
+    ) or 0
+    refundable_deposits = db.scalar(select(func.coalesce(func.sum(Customer.refundable_deposits), 0.0))) or 0.0
+
+    return schema.DashboardReport(
+        total_products=db.scalar(select(func.count(Product.id))) or 0,
+        total_customers=db.scalar(select(func.count(Customer.id))) or 0,
+        total_sales=db.scalar(select(func.count(Sale.id))) or 0,
+        sales_revenue=sales_revenue,
+        total_expenses=total_expenses,
+        gross_profit=sales_revenue - total_expenses,
+        low_stock_products=sum(1 for p in products if p.full_cases <= p.low_stock_threshold),
+        expiring_products=sum(1 for p in products if now <= p.expiry_date <= now + timedelta(days=30)),
+        expired_products=sum(1 for p in products if p.expiry_date < now),
+        pending_empty_cases=pending_empty_cases,
+        refundable_deposits=refundable_deposits,
+        recent_activities=activities,
+    )
