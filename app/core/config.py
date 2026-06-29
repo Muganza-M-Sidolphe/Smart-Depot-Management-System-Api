@@ -17,6 +17,15 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:3000"],
         validation_alias="BACKEND_CORS_ORIGINS",
     )
+    secret_key: str = Field(
+        default="change-me-in-production-please-set-a-long-random-secret",
+        validation_alias="SECRET_KEY",
+    )
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(
+        default=60 * 24,
+        validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
