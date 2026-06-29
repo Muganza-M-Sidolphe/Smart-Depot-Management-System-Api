@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, require_roles
+from app.core.roles import MANAGEMENT
 from app.schemas.depot import DepotCreate, DepotRead, DepotUpdate
 from app.services import depot_service
 
@@ -13,7 +14,12 @@ async def list_depots(db: Session = Depends(get_db)) -> list[DepotRead]:
     return depot_service.list_depots(db)
 
 
-@router.post("/", response_model=DepotRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=DepotRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles(*MANAGEMENT))],
+)
 async def create_depot(payload: DepotCreate, db: Session = Depends(get_db)) -> DepotRead:
     return depot_service.create_depot(db, payload)
 
@@ -26,7 +32,11 @@ async def get_depot(depot_id: int, db: Session = Depends(get_db)) -> DepotRead:
     return depot
 
 
-@router.patch("/{depot_id}", response_model=DepotRead)
+@router.patch(
+    "/{depot_id}",
+    response_model=DepotRead,
+    dependencies=[Depends(require_roles(*MANAGEMENT))],
+)
 async def update_depot(
     depot_id: int,
     payload: DepotUpdate,
@@ -38,7 +48,11 @@ async def update_depot(
     return depot
 
 
-@router.delete("/{depot_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{depot_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles(*MANAGEMENT))],
+)
 async def delete_depot(depot_id: int, db: Session = Depends(get_db)) -> None:
     deleted = depot_service.delete_depot(db, depot_id)
     if not deleted:

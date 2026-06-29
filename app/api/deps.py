@@ -1,9 +1,10 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.roles import Role
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
 from app.models.business import User
@@ -43,3 +44,18 @@ def get_current_user(
     if user is None:
         raise invalid
     return user
+
+
+def require_roles(*roles: Role | str) -> Callable[[User], User]:
+    """Dependency factory: allow only the given roles, else respond 403."""
+    allowed = {role.value if isinstance(role, Role) else str(role).lower() for role in roles}
+
+    def checker(current_user: User = Depends(get_current_user)) -> User:
+        if (current_user.role or "").lower() not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to perform this action",
+            )
+        return current_user
+
+    return checker

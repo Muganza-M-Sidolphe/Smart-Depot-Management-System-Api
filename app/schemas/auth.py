@@ -2,6 +2,7 @@ import re
 
 from pydantic import Field, field_validator
 
+from app.core.roles import Role, normalize_role
 from app.schemas.business import APIModel, UserRead
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -18,13 +19,18 @@ class SignupRequest(APIModel):
     name: str = Field(min_length=1, max_length=120)
     email: str
     password: str = Field(min_length=8, max_length=128)
-    role: str = "staff"
+    role: str = Role.CASHIER.value
     phone: str | None = None
 
     @field_validator("email")
     @classmethod
     def check_email(cls, value: str) -> str:
         return _validate_email(value)
+
+    @field_validator("role")
+    @classmethod
+    def check_role(cls, value: str) -> str:
+        return normalize_role(value)
 
 
 class LoginRequest(APIModel):
