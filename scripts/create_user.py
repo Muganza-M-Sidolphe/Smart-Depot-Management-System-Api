@@ -11,10 +11,9 @@ If the email already exists, its password and role are updated.
 
 import argparse
 
-from app.core.config import settings
 from app.core.roles import Role, normalize_role
 from app.core.security import hash_password
-from app.db.session import Base, SessionLocal, engine
+from app.db.session import Base, SessionLocal, describe_database, engine
 from app.main import ensure_schema
 from app.models.business import User
 from app.services import auth_service
@@ -52,7 +51,8 @@ def main() -> None:
         user.password_hash = hash_password(args.password)
         db.commit()
         db.refresh(user)
-        print(f"{action} user '{user.email}' (role={user.role}) in database: {settings.database_url}")
+        print(f"{action} user '{user.email}' (role={user.role})")
+        print(f"Database: {describe_database()}")
         print(f"Login with email='{user.email}' password='{args.password}'")
     finally:
         db.close()
