@@ -2,14 +2,21 @@ from collections.abc import AsyncGenerator, Callable
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.roles import Role
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
-from app.models.business import User
+from app.models.business import RevokedToken, User
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+_credentials_error = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Could not validate credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+)
 
 
 async def get_db() -> AsyncGenerator[Session, None]:
@@ -20,29 +27,33 @@ async def get_db() -> AsyncGenerator[Session, None]:
         db.close()
 
 
-def get_current_user(
+def get_token_payload(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
-) -> User:
-    invalid = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+) -> dict:
+    """Validate the Bearer token's signature/expiry and return its claims."""
     if credentials is None or credentials.scheme.lower() != "bearer":
-        raise invalid
-
+        raise _credentials_error
     payload = decode_access_token(credentials.credentials)
     if payload is None:
-        raise invalid
+        raise _credentials_error
+    return payload
+
+
+def get_current_user(
+    payload: dict = Depends(get_token_payload),
+    db: Session = Depends(get_db),
+) -> User:
+    jti = payload.get("jti")
+    if jti and db.scalar(select(RevokedToken).where(RevokedToken.jti == jti)) is not None:
+        raise _credentials_error
 
     subject = payload.get("sub")
     if subject is None:
-        raise invalid
+        raise _credentials_error
 
     user = db.get(User, int(subject)) if str(subject).isdigit() else None
     if user is None:
-        raise invalid
+        raise _credentials_error
     return user
 
 

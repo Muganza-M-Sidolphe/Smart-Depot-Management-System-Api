@@ -39,6 +39,7 @@ Base URL (local): `http://127.0.0.1:8000/api/v1`
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/auth/me` | Returns the current logged-in user |
+| POST | `/auth/logout` | Revokes the current token (see §10) |
 | GET/POST/PATCH/DELETE | everything else (`/products`, `/customers`, `/sales`, …) | Token required; writes also require a role (see §5) |
 
 ### Example login response
@@ -108,7 +109,13 @@ export async function login(email, password) {
   return data.user;
 }
 
-export function logout() {
+export async function logout() {
+  // Revoke the token on the server first (needs the token, so call before clearing).
+  try {
+    await api.post("/auth/logout");
+  } catch {
+    // ignore network/401 errors — we still log out locally below
+  }
   localStorage.removeItem("accessToken");
   localStorage.removeItem("user");
 }
@@ -229,6 +236,8 @@ The error message is always in the response body under `detail`.
    (cashiers can't manage stock). Log in as **owner/manager/storekeeper** → **201**.
 5. Manually delete the token from `localStorage` and refresh → protected calls
    should 401 and bounce you to login.
+6. Click logout, then try any protected request with the **same** token → it must
+   now return **401** (the server revoked it — see §10).
 
 ---
 
@@ -242,3 +251,50 @@ The error message is always in the response body under `detail`.
 - **CORS error in console** (different from 401) — the frontend's origin must be
   in the backend's `BACKEND_CORS_ORIGINS`. Ask the backend owner to add your
   dev URL (e.g. `http://localhost:5173`).
+
+---
+
+## 10. Logout
+
+Logout is **server-side**: calling `POST /auth/logout` revokes the token so it can
+no longer be used, even if someone copied it. This is stronger than just deleting
+the token from the browser.
+
+### Endpoint
+| Method | Path | Headers | Returns |
+|---|---|---|---|
+| POST | `/auth/logout` | `Authorization: Bearer <token>` | `{ "detail": "Successfully logged out" }` |
+
+### Rules
+- The logout call **needs the token** → call it **before** you clear `localStorage`.
+- After logout, that token returns **401** on every protected endpoint
+  (including `/auth/me`). The user must log in again to get a new token.
+- Logout with no token → 401.
+
+### How to call it (Axios)
+The `logout()` helper from §3 already does this:
+```js
+import { logout } from "./lib/api";
+
+async function handleLogout() {
+  await logout();          // revokes on server + clears localStorage
+  // window.location.href = "/login";
+}
+```
+
+### How to call it (Fetch)
+```js
+async function logout() {
+  try {
+    await apiFetch("/auth/logout", { method: "POST" }); // revoke server-side
+  } catch {
+    // ignore errors — still log out locally
+  }
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("user");
+}
+```
+
+> Important: always clear local storage even if the network call fails, so the
+> user is logged out on this device regardless. And don't keep using the old
+> token after logout — request a fresh one by logging in again.

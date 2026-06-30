@@ -77,6 +77,28 @@ async def test_me_rejects_missing_or_invalid_token(public_client: AsyncClient) -
     assert bad.status_code == 401
 
 
+@pytest.mark.anyio
+async def test_logout_revokes_token(public_client: AsyncClient) -> None:
+    token = (await public_client.post("/api/v1/auth/signup", json=SIGNUP_PAYLOAD)).json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # token works before logout
+    assert (await public_client.get("/api/v1/auth/me", headers=headers)).status_code == 200
+
+    logout = await public_client.post("/api/v1/auth/logout", headers=headers)
+    assert logout.status_code == 200
+    assert logout.json()["detail"] == "Successfully logged out"
+
+    # same token is rejected after logout
+    assert (await public_client.get("/api/v1/auth/me", headers=headers)).status_code == 401
+    assert (await public_client.get("/api/v1/products/", headers=headers)).status_code == 401
+
+
+@pytest.mark.anyio
+async def test_logout_requires_authentication(public_client: AsyncClient) -> None:
+    assert (await public_client.post("/api/v1/auth/logout")).status_code == 401
+
+
 async def _token_for(public_client: AsyncClient, role: str) -> str:
     payload = {
         "name": f"{role.title()} User",

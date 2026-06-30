@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_token_payload
 from app.models.business import User
 from app.schemas import auth as schema
 from app.schemas.business import UserRead
@@ -25,3 +25,13 @@ async def login(payload: schema.LoginRequest, db: Session = Depends(get_db)) -> 
 @router.get("/me", response_model=UserRead)
 async def read_current_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.post("/logout")
+async def logout(
+    payload: dict = Depends(get_token_payload),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    auth_service.revoke_token(db, payload)
+    return {"detail": "Successfully logged out"}

@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -55,6 +56,7 @@ def create_access_token(subject: str, extra_claims: dict | None = None) -> str:
         "sub": str(subject),
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
+        "jti": uuid.uuid4().hex,
     }
     if extra_claims:
         payload.update(extra_claims)

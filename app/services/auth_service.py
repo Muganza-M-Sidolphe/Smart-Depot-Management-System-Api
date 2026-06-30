@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -7,7 +9,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models.business import User
+from app.models.business import RevokedToken, User, utcnow
 from app.schemas import auth as schema
 
 
@@ -53,3 +55,19 @@ def authenticate(db: Session, email: str, password: str) -> User:
 
 def issue_token(user: User) -> str:
     return create_access_token(subject=user.id, extra_claims={"email": user.email, "role": user.role})
+
+
+def revoke_token(db: Session, payload: dict) -> None:
+    """Add the token's id to the denylist so it can no longer authenticate."""
+    jti = payload.get("jti")
+    if not jti:
+        return
+
+    # Opportunistically drop denylist rows whose tokens have already expired.
+    db.query(RevokedToken).filter(RevokedToken.expires_at < utcnow()).delete()
+
+    if db.scalar(select(RevokedToken).where(RevokedToken.jti == jti)) is None:
+        exp = payload.get("exp")
+        expires_at = datetime.fromtimestamp(exp, tz=timezone.utc).replace(tzinfo=None) if exp else utcnow()
+        db.add(RevokedToken(jti=jti, expires_at=expires_at))
+    db.commit()
