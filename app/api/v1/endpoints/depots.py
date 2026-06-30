@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
 from app.core.roles import MANAGEMENT
+from app.models.depot import Depot
 from app.schemas.depot import DepotCreate, DepotRead, DepotUpdate
 from app.services import depot_service
 
@@ -10,7 +11,7 @@ router = APIRouter()
 
 
 @router.get("/", response_model=list[DepotRead])
-async def list_depots(db: Session = Depends(get_db)) -> list[DepotRead]:
+async def list_depots(db: Session = Depends(get_db)) -> list[Depot]:
     return depot_service.list_depots(db)
 
 
@@ -20,12 +21,12 @@ async def list_depots(db: Session = Depends(get_db)) -> list[DepotRead]:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_roles(*MANAGEMENT))],
 )
-async def create_depot(payload: DepotCreate, db: Session = Depends(get_db)) -> DepotRead:
+async def create_depot(payload: DepotCreate, db: Session = Depends(get_db)) -> Depot:
     return depot_service.create_depot(db, payload)
 
 
 @router.get("/{depot_id}", response_model=DepotRead)
-async def get_depot(depot_id: int, db: Session = Depends(get_db)) -> DepotRead:
+async def get_depot(depot_id: int, db: Session = Depends(get_db)) -> Depot:
     depot = depot_service.get_depot(db, depot_id)
     if depot is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Depot not found")
@@ -41,7 +42,7 @@ async def update_depot(
     depot_id: int,
     payload: DepotUpdate,
     db: Session = Depends(get_db),
-) -> DepotRead:
+) -> Depot:
     depot = depot_service.update_depot(db, depot_id, payload)
     if depot is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Depot not found")
