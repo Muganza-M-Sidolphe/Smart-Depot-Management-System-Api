@@ -18,7 +18,7 @@ def _validate_email(value: str) -> str:
 class SignupRequest(APIModel):
     name: str = Field(min_length=1, max_length=120)
     email: str
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     role: str = Role.CASHIER.value
     phone: str | None = None
 

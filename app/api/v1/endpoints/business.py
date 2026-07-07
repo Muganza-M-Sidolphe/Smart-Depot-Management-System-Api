@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
-from app.core.roles import MANAGEMENT, OPERATIONS_ROLES, SALES_ROLES, STOCK_ROLES, Role
+from app.core.roles import MANAGEMENT, OPERATIONS_ROLES, SALES_ROLES, STOCK_ROLES, USER_ADMIN_ROLES
 from app.models.business import (
     Activity,
     Customer,
@@ -32,16 +32,16 @@ async def list_users(db: Session = Depends(get_db)) -> list[User]:
     "/users/",
     response_model=schema.UserRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles(Role.OWNER))],
+    dependencies=[Depends(require_roles(*USER_ADMIN_ROLES))],
 )
 async def create_user(payload: schema.UserCreate, db: Session = Depends(get_db)) -> User:
-    return business_service.create_record(db, User, payload)
+    return business_service.create_user(db, payload)
 
 
 @router.patch(
     "/users/{record_id}",
     response_model=schema.UserRead,
-    dependencies=[Depends(require_roles(Role.OWNER))],
+    dependencies=[Depends(require_roles(*USER_ADMIN_ROLES))],
 )
 async def update_user(record_id: int, payload: schema.UserUpdate, db: Session = Depends(get_db)) -> User:
     record = business_service.update_record(db, User, record_id, payload)
@@ -53,7 +53,7 @@ async def update_user(record_id: int, payload: schema.UserUpdate, db: Session = 
 @router.delete(
     "/users/{record_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_roles(Role.OWNER))],
+    dependencies=[Depends(require_roles(*USER_ADMIN_ROLES))],
 )
 async def delete_user(record_id: int, db: Session = Depends(get_db)) -> None:
     if not business_service.delete_record(db, User, record_id):
@@ -222,7 +222,7 @@ async def list_expenses(db: Session = Depends(get_db)) -> list[Expense]:
     dependencies=[Depends(require_roles(*MANAGEMENT))],
 )
 async def create_expense(payload: schema.ExpenseCreate, db: Session = Depends(get_db)) -> Expense:
-    return business_service.create_record(db, Expense, payload)
+    return business_service.create_expense(db, payload)
 
 
 @router.patch(
@@ -231,7 +231,7 @@ async def create_expense(payload: schema.ExpenseCreate, db: Session = Depends(ge
     dependencies=[Depends(require_roles(*MANAGEMENT))],
 )
 async def update_expense(record_id: int, payload: schema.ExpenseUpdate, db: Session = Depends(get_db)) -> Expense:
-    record = business_service.update_record(db, Expense, record_id, payload)
+    record = business_service.update_expense(db, record_id, payload)
     if record is None:
         raise not_found("Expense")
     return record

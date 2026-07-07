@@ -15,5 +15,11 @@ htmlcov/
 *.sqlite3
 *.db
 
+# Uploaded files (receipts, etc.)
+uploads/
+
 .mypy_cache/
 .ruff_cache/
+
+# Frontend lives in its own separate git repo
+frontend/

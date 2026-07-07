@@ -173,26 +173,33 @@ await apiFetch("/sales/", { method: "POST", body: JSON.stringify(salePayload) })
 
 ## 5. Roles & permissions
 
-There are four roles. The role is chosen at signup and shown on `/auth/me`.
+There are six accepted roles. The role is chosen at signup and shown on `/auth/me`.
+Sending any other value returns 422.
 
-| Role | Value to send |
-|---|---|
-| Owner | `owner` |
-| Manager | `manager` |
-| Cashier | `cashier` |
-| Storekeeper | `storekeeper` |
+| Role | Value to send | Access level |
+|---|---|---|
+| Owner | `owner` | Full |
+| Admin | `admin` | Full (same as owner) |
+| Manager | `manager` | Management |
+| Cashier | `cashier` | Sales |
+| Storekeeper | `storekeeper` | Stock |
+| Staff | `staff` | Operations only (read + empties) |
 
 **Reading data (GET):** any logged-in user.
 
 **Writing data (POST/PATCH/DELETE):** depends on role —
 
-| Action | Owner | Manager | Cashier | Storekeeper |
-|---|:--:|:--:|:--:|:--:|
-| Users (create/edit/delete) | ✅ | ❌ | ❌ | ❌ |
-| Products / Suppliers / Supplier-returns / Damaged-cases | ✅ | ✅ | ❌ | ✅ |
-| Customers / Sales | ✅ | ✅ | ✅ | ❌ |
-| Empty-case transactions & returns | ✅ | ✅ | ✅ | ✅ |
-| Expenses / Notifications / Audits / Depots | ✅ | ✅ | ❌ | ❌ |
+| Action | Owner | Admin | Manager | Cashier | Storekeeper | Staff |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| Users (create/edit/delete) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Products / Suppliers / Supplier-returns / Damaged-cases | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Customers / Sales | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Empty-case transactions & returns | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Expenses / Notifications / Audits / Depots | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+> Creating users via `POST /users/` now accepts an optional `password` — include
+> it so the created user can log in. Without it the account exists but cannot
+> authenticate. Password minimum length is **6** characters (signup and user creation).
 
 If a user tries an action their role can't do, the API returns **403**:
 ```json
@@ -298,3 +305,42 @@ async function logout() {
 > Important: always clear local storage even if the network call fails, so the
 > user is logged out on this device regardless. And don't keep using the old
 > token after logout — request a fresh one by logging in again.
+
+---
+
+## 11. Newly supported request fields (inventory, sales, expenses)
+
+The backend was extended so the fields the current forms send are **persisted**
+(previously they were silently dropped). All fields are camelCase.
+
+### Products — `POST/PATCH /products/`
+In addition to the base product fields, these are now stored and returned:
+`containerType`, `containerSizeLabel`, `bottlesPerContainer`,
+`purchasePricePerContainer`, `sellingPricePerContainer`,
+`bottleInfo` (object `{damaged, missing, returned, notes}`),
+`partialCases` (array), `lastStockCheck`. Reads also return `updatedAt`.
+
+### Sales — `POST /sales/`
+Now accepted and applied server-side (do **not** send computed totals — the
+server calculates them):
+- `tax` — a **percentage** (e.g. `10` = 10%); the server computes the tax amount and adds it to `total`.
+- `isPartialPayment` (boolean) + optional `remainingBalance`. On a partial sale the unpaid amount is added to the customer's `unpaidBalance`.
+- Per line item: `emptyCasesReturned` (returned at the sale) and `remainingEmptyCases`.
+- The sale response now includes `tax`, `isPartialPayment`, `remainingBalance`, `emptyCasesTotal`, `remainingEmptyCasesTotal`, and per-item `emptyCasesReturned` / `remainingEmptyCases`.
+
+Payment values: `cash`, `mobile`, `card`, `bank`.
+
+### Expenses — `POST/PATCH /expenses/`
+Now stored: `description`, `paymentMethod`, `dueDate`, `receiptNumber`,
+`quantity`, `unitPrice`, `createdBy`, `updatedBy`. The `notes` field is accepted
+and maps onto `note`.
+
+**Receipt upload:** send the file as a base64 data URL in `receipt` plus
+`receiptFileName` (and optionally `receiptFileType`, `receiptFileSize`). The
+backend stores it and returns **`receiptUrl`** (a fully-qualified URL you can use
+directly in an `<img>`/link) and `receiptFileName`. Invalid base64 returns 400.
+
+> Still not implemented (calling these will 404): the analytics/filter helper
+> endpoints in the services (`/sales/daily-summary`, `/expenses/summary/category`,
+> `/products/low-stock`, `/products/{id}/stock`, `PATCH`/`DELETE /sales/{id}`, etc.).
+> Keep computing those client-side for now, or ask the backend team to add them.

@@ -8,18 +8,29 @@ from enum import Enum
 
 class Role(str, Enum):
     OWNER = "owner"
+    ADMIN = "admin"
     MANAGER = "manager"
     CASHIER = "cashier"
     STOREKEEPER = "storekeeper"
+    STAFF = "staff"
 
 
 ALL_ROLES: tuple[Role, ...] = tuple(Role)
 
 # Convenience groupings used by the endpoints.
-MANAGEMENT: tuple[Role, ...] = (Role.OWNER, Role.MANAGER)
-SALES_ROLES: tuple[Role, ...] = (Role.OWNER, Role.MANAGER, Role.CASHIER)
-STOCK_ROLES: tuple[Role, ...] = (Role.OWNER, Role.MANAGER, Role.STOREKEEPER)
-OPERATIONS_ROLES: tuple[Role, ...] = (Role.OWNER, Role.MANAGER, Role.CASHIER, Role.STOREKEEPER)
+# owner/admin are full-access; staff is the lowest, operations-only role.
+USER_ADMIN_ROLES: tuple[Role, ...] = (Role.OWNER, Role.ADMIN)
+MANAGEMENT: tuple[Role, ...] = (Role.OWNER, Role.ADMIN, Role.MANAGER)
+SALES_ROLES: tuple[Role, ...] = (Role.OWNER, Role.ADMIN, Role.MANAGER, Role.CASHIER)
+STOCK_ROLES: tuple[Role, ...] = (Role.OWNER, Role.ADMIN, Role.MANAGER, Role.STOREKEEPER)
+OPERATIONS_ROLES: tuple[Role, ...] = (
+    Role.OWNER,
+    Role.ADMIN,
+    Role.MANAGER,
+    Role.CASHIER,
+    Role.STOREKEEPER,
+    Role.STAFF,
+)
 
 
 def normalize_role(value: str) -> str:

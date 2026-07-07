@@ -170,3 +170,41 @@ async def test_only_owner_can_create_users(public_client: AsyncClient) -> None:
 async def test_any_authenticated_role_can_read(public_client: AsyncClient) -> None:
     cashier = await _token_for(public_client, "cashier")
     assert (await public_client.get("/api/v1/products/", headers=_auth(cashier))).status_code == 200
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("role", ["owner", "admin", "manager", "cashier", "storekeeper", "staff"])
+async def test_signup_accepts_all_frontend_roles(public_client: AsyncClient, role: str) -> None:
+    response = await public_client.post(
+        "/api/v1/auth/signup",
+        json={"name": role, "email": f"{role}@x.rw", "password": "secret6", "role": role},
+    )
+    assert response.status_code == 201
+    assert response.json()["user"]["role"] == role
+
+
+@pytest.mark.anyio
+async def test_signup_accepts_six_char_password(public_client: AsyncClient) -> None:
+    response = await public_client.post(
+        "/api/v1/auth/signup",
+        json={"name": "Six", "email": "six@x.rw", "password": "123456", "role": "cashier"},
+    )
+    assert response.status_code == 201
+
+
+@pytest.mark.anyio
+async def test_admin_created_user_with_password_can_login(public_client: AsyncClient) -> None:
+    owner = await _token_for(public_client, "owner")
+    created = await public_client.post(
+        "/api/v1/users/",
+        json={"name": "Staffer", "email": "staffer@x.rw", "role": "cashier", "password": "secret6"},
+        headers=_auth(owner),
+    )
+    assert created.status_code == 201
+
+    login = await public_client.post(
+        "/api/v1/auth/login",
+        json={"email": "staffer@x.rw", "password": "secret6"},
+    )
+    assert login.status_code == 200
+    assert login.json()["accessToken"]

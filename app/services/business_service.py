@@ -42,6 +42,76 @@ def create_record(db: Session, model: type[ModelT], payload: Any) -> ModelT:
     return record
 
 
+def create_user(db: Session, payload: schema.UserCreate) -> User:
+    """Create a user, hashing the password if one was supplied so they can log in."""
+    from app.core.security import hash_password
+
+    data = payload.model_dump()
+    password = data.pop("password", None)
+    user = User(**data)
+    if password:
+        user.password_hash = hash_password(password)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+_EXPENSE_RECEIPT_KEYS = ("receipt", "receipt_file_name", "receipt_file_type", "receipt_file_size", "notes")
+
+
+def _apply_expense_receipt(data: dict[str, Any]) -> None:
+    """Handle the input-only receipt/notes fields in an expense payload in place.
+
+    Saves the base64 receipt to disk and replaces it with receipt_url +
+    receipt_file_name; maps the frontend `notes` alias onto `note`.
+    """
+    from app.core.uploads import save_receipt
+
+    receipt = data.pop("receipt", None)
+    receipt_file_name = data.pop("receipt_file_name", None)
+    data.pop("receipt_file_type", None)
+    data.pop("receipt_file_size", None)
+    notes = data.pop("notes", None)
+
+    if notes is not None and not data.get("note"):
+        data["note"] = notes
+
+    if receipt:
+        try:
+            data["receipt_url"] = save_receipt(receipt, receipt_file_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if receipt_file_name:
+            data["receipt_file_name"] = receipt_file_name
+
+
+def create_expense(db: Session, payload: schema.ExpenseCreate) -> Expense:
+    data = payload.model_dump()
+    _apply_expense_receipt(data)
+    expense = Expense(**data)
+    db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
+def update_expense(db: Session, record_id: int, payload: schema.ExpenseUpdate) -> Expense | None:
+    expense = db.get(Expense, record_id)
+    if expense is None:
+        return None
+
+    data = payload.model_dump(exclude_unset=True)
+    _apply_expense_receipt(data)
+    for key, value in data.items():
+        setattr(expense, key, value)
+    expense.updated_at = utcnow()
+
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
 def update_record(db: Session, model: type[ModelT], record_id: int, payload: Any) -> ModelT | None:
     record = get_record(db, model, record_id)
     if record is None:
@@ -113,8 +183,9 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
 
     sale_count = db.scalar(select(func.count(Sale.id))) or 0
     subtotal = 0.0
-    expected_empties = 0
-    total_deposit_value = 0.0
+    pending_empties = 0       # cases still owed after any returned at the sale
+    returned_empties = 0      # cases returned right at the point of sale
+    pending_deposit_value = 0.0
 
     sale = Sale(
         receipt_no=f"RCP-{1001 + sale_count}",
@@ -122,14 +193,19 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
         customer_name=payload.customer_name,
         subtotal=0,
         discount=payload.discount,
+        tax=0,
         total=0,
         payment=payload.payment,
         amount_paid=payload.amount_paid,
         change=0,
+        is_partial_payment=payload.is_partial_payment,
+        remaining_balance=0,
         cashier=payload.cashier,
         payment_method=payload.payment,
         expected_empties=0,
         returned_empties=0,
+        empty_cases_total=0,
+        remaining_empty_cases_total=0,
         invoice_number=f"INV-{1001 + sale_count}",
         status="completed",
     )
@@ -141,8 +217,13 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
         unit_price = item.unit_price if item.unit_price is not None else product.selling_price
         line_subtotal = item.quantity * unit_price
         subtotal += line_subtotal
-        expected_empties += item.quantity
-        total_deposit_value += item.quantity * product.deposit_amount
+
+        # Empties returned immediately at the sale reduce what the customer still owes.
+        returned_now = min(item.empty_cases_returned, item.quantity)
+        pending_now = item.quantity - returned_now
+        pending_empties += pending_now
+        returned_empties += returned_now
+        pending_deposit_value += pending_now * product.deposit_amount
         product.full_cases -= item.quantity
 
         db.add(
@@ -153,6 +234,8 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
                 quantity=item.quantity,
                 unit_price=unit_price,
                 subtotal=line_subtotal,
+                empty_cases_returned=returned_now,
+                remaining_empty_cases=pending_now,
             )
         )
 
@@ -163,35 +246,56 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
                 customer_name=payload.customer_name,
                 transaction_type="sale",
                 total_quantity=item.quantity,
-                returned_quantity=0,
-                pending_quantity=item.quantity,
+                returned_quantity=returned_now,
+                pending_quantity=pending_now,
                 deposit_amount=product.deposit_amount,
                 total_deposit_value=item.quantity * product.deposit_amount,
-                refunded_amount=0,
+                refunded_amount=returned_now * product.deposit_amount,
                 expected_return_date=utcnow() + timedelta(days=7),
+                actual_return_date=utcnow() if pending_now == 0 and returned_now > 0 else None,
                 product_name=product.name,
-                status="pending",
+                status="completed" if pending_now == 0 else ("partial" if returned_now > 0 else "pending"),
                 created_by=payload.cashier,
             )
         )
 
-    total = max(0.0, subtotal - payload.discount)
+    taxable = max(0.0, subtotal - payload.discount)
+    tax_amount = round(taxable * payload.tax / 100.0, 2)
+    total = taxable + tax_amount
+    remaining_balance = (
+        payload.remaining_balance
+        if payload.remaining_balance is not None
+        else max(0.0, total - payload.amount_paid)
+    )
+    if not payload.is_partial_payment:
+        remaining_balance = 0.0
+
     sale.subtotal = subtotal
+    sale.tax = tax_amount
     sale.total = total
     sale.change = max(0.0, payload.amount_paid - total)
-    sale.expected_empties = expected_empties
+    sale.expected_empties = pending_empties
+    sale.returned_empties = returned_empties
+    sale.empty_cases_total = returned_empties
+    sale.remaining_empty_cases_total = pending_empties
+    sale.remaining_balance = remaining_balance
 
     if payload.customer_id is not None:
         customer = db.get(Customer, payload.customer_id)
         if customer is not None:
-            customer.pending_empties += expected_empties
+            customer.pending_empties += pending_empties
             customer.total_purchases += total
             customer.total_spent += total
-            customer.refundable_deposits += total_deposit_value
+            customer.refundable_deposits += pending_deposit_value
+            customer.unpaid_balance += remaining_balance
             customer.total_transactions += 1
             customer.updated_at = utcnow()
 
-    create_activity(db, "sale", f"{payload.cashier} sold {expected_empties} cases to {payload.customer_name}")
+    create_activity(
+        db,
+        "sale",
+        f"{payload.cashier} sold {pending_empties + returned_empties} cases to {payload.customer_name}",
+    )
     db.commit()
     return get_sale(db, sale.id)  # type: ignore[return-value]
 

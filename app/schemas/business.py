@@ -26,7 +26,8 @@ class UserBase(APIModel):
 
 
 class UserCreate(UserBase):
-    pass
+    # Optional so admins can pre-create accounts; if given, the user can log in.
+    password: str | None = Field(default=None, min_length=6, max_length=128)
 
 
 class UserUpdate(APIModel):
@@ -81,6 +82,15 @@ class ProductBase(APIModel):
     expiry_date: datetime
     low_stock_threshold: int = Field(default=0, ge=0)
     deposit_amount: float = Field(default=0, ge=0)
+    # Container / bottle-level extras (persisted as-is)
+    container_type: str | None = None
+    container_size_label: str | None = None
+    bottles_per_container: int | None = None
+    purchase_price_per_container: float | None = None
+    selling_price_per_container: float | None = None
+    bottle_info: dict[str, Any] | None = None
+    partial_cases: list[Any] | None = None
+    last_stock_check: datetime | None = None
 
 
 class ProductCreate(ProductBase):
@@ -101,11 +111,20 @@ class ProductUpdate(APIModel):
     expiry_date: datetime | None = None
     low_stock_threshold: int | None = Field(default=None, ge=0)
     deposit_amount: float | None = Field(default=None, ge=0)
+    container_type: str | None = None
+    container_size_label: str | None = None
+    bottles_per_container: int | None = None
+    purchase_price_per_container: float | None = None
+    selling_price_per_container: float | None = None
+    bottle_info: dict[str, Any] | None = None
+    partial_cases: list[Any] | None = None
+    last_stock_check: datetime | None = None
 
 
 class ProductRead(ProductBase):
     id: int
     created_at: datetime
+    updated_at: datetime | None = None
 
 
 class CustomerBase(APIModel):
@@ -155,6 +174,8 @@ class SaleItemCreate(APIModel):
     name: str | None = None
     quantity: int = Field(gt=0)
     unit_price: float | None = Field(default=None, ge=0)
+    empty_cases_returned: int = Field(default=0, ge=0)
+    remaining_empty_cases: int = Field(default=0, ge=0)
 
 
 class SaleItemRead(APIModel):
@@ -164,6 +185,8 @@ class SaleItemRead(APIModel):
     quantity: int
     unit_price: float
     subtotal: float
+    empty_cases_returned: int = 0
+    remaining_empty_cases: int = 0
 
 
 class SaleCreate(APIModel):
@@ -171,8 +194,11 @@ class SaleCreate(APIModel):
     customer_name: str
     items: list[SaleItemCreate]
     discount: float = Field(default=0, ge=0)
+    tax: float = Field(default=0, ge=0)  # percentage, e.g. 10 for 10%
     payment: str
     amount_paid: float = Field(default=0, ge=0)
+    is_partial_payment: bool = False
+    remaining_balance: float | None = Field(default=None, ge=0)
     cashier: str
 
 
@@ -184,14 +210,19 @@ class SaleRead(APIModel):
     items: list[SaleItemRead]
     subtotal: float
     discount: float
+    tax: float
     total: float
     payment: str
     amount_paid: float
     change: float
+    is_partial_payment: bool
+    remaining_balance: float
     cashier: str
     payment_method: str
     expected_empties: int
     returned_empties: int
+    empty_cases_total: int
+    remaining_empty_cases_total: int
     invoice_number: str
     status: str
     created_at: datetime
@@ -207,13 +238,32 @@ class ExpenseBase(APIModel):
     recorded_by: str
     invoice_number: str = ""
     supplier_name: str | None = None
+    # Additional fields from the frontend expense form (persisted as-is)
+    description: str | None = None
+    payment_method: str | None = None
+    due_date: datetime | None = None
+    receipt_number: str | None = None
+    quantity: float | None = None
+    unit_price: float | None = None
+    created_by: str | None = None
+    updated_by: str | None = None
 
 
-class ExpenseCreate(ExpenseBase):
+# Input-only receipt fields shared by create/update. The base64 `receipt` is
+# stored on disk and turned into `receipt_url`; it is never persisted verbatim.
+class ExpenseReceiptInput(APIModel):
+    receipt: str | None = None
+    receipt_file_name: str | None = None
+    receipt_file_type: str | None = None
+    receipt_file_size: int | None = None
+    notes: str | None = None  # frontend alias for `note`
+
+
+class ExpenseCreate(ExpenseBase, ExpenseReceiptInput):
     pass
 
 
-class ExpenseUpdate(APIModel):
+class ExpenseUpdate(ExpenseReceiptInput):
     title: str | None = None
     category: str | None = None
     amount: float | None = None
@@ -223,10 +273,21 @@ class ExpenseUpdate(APIModel):
     recorded_by: str | None = None
     invoice_number: str | None = None
     supplier_name: str | None = None
+    description: str | None = None
+    payment_method: str | None = None
+    due_date: datetime | None = None
+    receipt_number: str | None = None
+    quantity: float | None = None
+    unit_price: float | None = None
+    created_by: str | None = None
+    updated_by: str | None = None
 
 
 class ExpenseRead(ExpenseBase):
     id: int
+    updated_at: datetime | None = None
+    receipt_url: str | None = None
+    receipt_file_name: str | None = None
 
 
 class ActivityCreate(APIModel):

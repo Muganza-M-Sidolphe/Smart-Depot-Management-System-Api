@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, JSON
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -63,6 +63,19 @@ class Product(Base):
     deposit_amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
+    # Container / unit-conversion model (prices entered per container, stored per bottle)
+    container_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    container_size_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    bottles_per_container: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    purchase_price_per_container: Mapped[float | None] = mapped_column(Float, nullable=True)
+    selling_price_per_container: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Bottle-level tracking {damaged, missing, returned, notes}
+    bottle_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Opened/partial cases (array of {bottleCount, openedDate, reason, ...})
+    partial_cases: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    last_stock_check: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     sale_items: Mapped[list["SaleItem"]] = relationship(back_populates="product")
 
 
@@ -98,10 +111,15 @@ class Sale(Base):
     customer_name: Mapped[str] = mapped_column(String(160), nullable=False)
     subtotal: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     discount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    tax: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     total: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     payment: Mapped[str] = mapped_column(String(40), nullable=False)
     amount_paid: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     change: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    is_partial_payment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    remaining_balance: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    empty_cases_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    remaining_empty_cases_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cashier: Mapped[str] = mapped_column(String(120), nullable=False)
     payment_method: Mapped[str] = mapped_column(String(40), nullable=False)
     expected_empties: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -124,6 +142,8 @@ class SaleItem(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[float] = mapped_column(Float, nullable=False)
     subtotal: Mapped[float] = mapped_column(Float, nullable=False)
+    empty_cases_returned: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    remaining_empty_cases: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     sale: Mapped[Sale] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(back_populates="sale_items")
@@ -142,6 +162,19 @@ class Expense(Base):
     recorded_by: Mapped[str] = mapped_column(String(120), nullable=False)
     invoice_number: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     supplier_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # Additional fields sent by the frontend expense form
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    receipt_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Uploaded receipt (stored locally, served via /uploads)
+    receipt_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    receipt_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class Activity(Base):
