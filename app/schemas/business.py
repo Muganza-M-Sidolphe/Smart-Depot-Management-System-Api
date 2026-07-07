@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def to_camel(value: str) -> str:
@@ -41,6 +41,12 @@ class UserUpdate(APIModel):
 class UserRead(UserBase):
     id: int
     created_at: datetime
+    must_change_password: bool = False
+
+    @field_validator("must_change_password", mode="before")
+    @classmethod
+    def _coerce_none(cls, value: object) -> bool:
+        return bool(value) if value is not None else False
 
 
 class SupplierBase(APIModel):

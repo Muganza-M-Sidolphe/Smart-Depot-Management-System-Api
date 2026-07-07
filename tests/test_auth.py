@@ -287,6 +287,71 @@ async def test_created_user_without_password_gets_generated_one_and_can_login(
 
 
 @pytest.mark.anyio
+async def test_signup_user_does_not_need_password_change(public_client: AsyncClient) -> None:
+    body = (await public_client.post("/api/v1/auth/signup", json=SIGNUP_PAYLOAD)).json()
+    assert body["user"]["mustChangePassword"] is False
+
+
+@pytest.mark.anyio
+async def test_generated_password_user_must_change_then_can_clear_it(
+    public_client: AsyncClient, monkeypatch
+) -> None:
+    from app.services import business_service
+
+    monkeypatch.setattr(business_service, "generate_password", lambda: "Temp123abc")
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.business.send_welcome_email",
+        lambda to, name, password: None,
+    )
+    owner = await _token_for(public_client, "owner")
+
+    created = await public_client.post(
+        "/api/v1/users/",
+        json={"name": "Temp", "email": "temp@x.rw", "role": "cashier"},
+        headers=_auth(owner),
+    )
+    assert created.json()["mustChangePassword"] is True
+
+    # the flag comes back on login
+    login = await public_client.post(
+        "/api/v1/auth/login", json={"email": "temp@x.rw", "password": "Temp123abc"}
+    )
+    token = login.json()["accessToken"]
+    assert login.json()["user"]["mustChangePassword"] is True
+
+    # wrong current password is rejected
+    bad = await public_client.post(
+        "/api/v1/auth/change-password",
+        json={"currentPassword": "wrong", "newPassword": "Chosen123"},
+        headers=_auth(token),
+    )
+    assert bad.status_code == 400
+
+    # change it -> flag clears
+    ok = await public_client.post(
+        "/api/v1/auth/change-password",
+        json={"currentPassword": "Temp123abc", "newPassword": "Chosen123"},
+        headers=_auth(token),
+    )
+    assert ok.status_code == 200
+
+    me = await public_client.get("/api/v1/auth/me", headers=_auth(token))
+    assert me.json()["mustChangePassword"] is False
+
+    # new password works, old one does not
+    assert (
+        await public_client.post(
+            "/api/v1/auth/login", json={"email": "temp@x.rw", "password": "Chosen123"}
+        )
+    ).status_code == 200
+    assert (
+        await public_client.post(
+            "/api/v1/auth/login", json={"email": "temp@x.rw", "password": "Temp123abc"}
+        )
+    ).status_code == 401
+
+
+@pytest.mark.anyio
 async def test_admin_created_user_with_password_can_login(public_client: AsyncClient) -> None:
     owner = await _token_for(public_client, "owner")
     created = await public_client.post(

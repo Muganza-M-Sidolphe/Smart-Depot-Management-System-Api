@@ -64,6 +64,21 @@ async def reset_password(
     return {"detail": "Your password has been reset. You can now log in."}
 
 
+@router.post("/change-password")
+async def change_password(
+    payload: schema.ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    ok = auth_service.change_password(db, current_user, payload.current_password, payload.new_password)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+    return {"detail": "Your password has been changed."}
+
+
 @router.post("/logout")
 async def logout(
     payload: dict = Depends(get_token_payload),

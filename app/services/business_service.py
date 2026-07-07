@@ -69,6 +69,8 @@ def create_user(db: Session, payload: schema.UserCreate) -> tuple[User, str | No
 
     user = User(**data)
     user.password_hash = hash_password(password)
+    # Users given a system-generated temp password must change it on first login.
+    user.must_change_password = generated is not None
     db.add(user)
     db.commit()
     db.refresh(user)

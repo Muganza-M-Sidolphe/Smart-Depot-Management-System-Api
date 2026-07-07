@@ -54,10 +54,36 @@ Base URL (local): `http://127.0.0.1:8000/api/v1`
     "role": "owner",
     "phone": "+250788000000",
     "status": "active",
+    "mustChangePassword": false,
     "createdAt": "2026-06-30T10:00:00"
   }
 }
 ```
+
+**`mustChangePassword`** — `true` when the user still has a system-generated
+temporary password (i.e. an admin created them and they haven't chosen their own
+yet). It's on the `user` object in the login **and** `/auth/me` responses. After
+login, check it and, if `true`, route the user straight to a "change password"
+screen instead of the dashboard:
+
+```js
+const { user } = data;                 // from login
+if (user.mustChangePassword) {
+  // redirect to /change-password (don't send them to the dashboard yet)
+} else {
+  // normal role-based redirect
+}
+```
+
+Change it via **`POST /auth/change-password`** (requires the token):
+```js
+await api.post("/auth/change-password", {
+  currentPassword,   // their temp/current password
+  newPassword,       // min 6 chars
+});
+// on 200 the flag is cleared; proceed to the dashboard. 400 = current password wrong.
+```
+(Signup users and anyone who has reset their password have `mustChangePassword: false`.)
 
 > Note: all request/response fields are **camelCase** (`accessToken`, `fullCases`, `customerId`, …).
 

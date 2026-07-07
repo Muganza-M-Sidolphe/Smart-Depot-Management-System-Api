@@ -99,10 +99,22 @@ def reset_password(db: Session, token: str, new_password: str) -> User | None:
         return None
 
     user.password_hash = hash_password(new_password)
+    user.must_change_password = False
     reset.used = True
     db.commit()
     db.refresh(user)
     return user
+
+
+def change_password(db: Session, user: User, current_password: str, new_password: str) -> bool:
+    """Change a logged-in user's password after verifying their current one."""
+    if not user.password_hash or not verify_password(current_password, user.password_hash):
+        return False
+    user.password_hash = hash_password(new_password)
+    user.must_change_password = False
+    db.commit()
+    db.refresh(user)
+    return True
 
 
 def revoke_token(db: Session, payload: dict) -> None:
