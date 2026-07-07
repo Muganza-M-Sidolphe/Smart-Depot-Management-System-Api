@@ -31,6 +31,22 @@ class Settings(BaseSettings):
         default="http://127.0.0.1:8000",
         validation_alias="PUBLIC_BASE_URL",
     )
+    # Frontend base URL used to build the login link in emails.
+    frontend_url: str = Field(default="http://localhost:3000", validation_alias="FRONTEND_URL")
+
+    # Email / SMTP. When smtp_host is empty, emails are logged instead of sent
+    # (handy for local development without real mail credentials).
+    smtp_host: str = Field(default="", validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
+    smtp_user: str = Field(default="", validation_alias="SMTP_USER")
+    smtp_password: str = Field(default="", validation_alias="SMTP_PASSWORD")
+    smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
+    email_from: str = Field(default="no-reply@smartdepot.local", validation_alias="EMAIL_FROM")
+    email_from_name: str = Field(default="Smart Depot", validation_alias="EMAIL_FROM_NAME")
+
+    @property
+    def emails_enabled(self) -> bool:
+        return bool(self.smtp_host)
 
     model_config = SettingsConfigDict(
         env_file=".env",

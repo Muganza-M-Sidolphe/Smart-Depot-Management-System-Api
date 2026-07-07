@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
+from app.core.email import send_welcome_email
 from app.core.roles import MANAGEMENT, OPERATIONS_ROLES, SALES_ROLES, STOCK_ROLES, USER_ADMIN_ROLES
 from app.models.business import (
     Activity,
@@ -34,8 +35,16 @@ async def list_users(db: Session = Depends(get_db)) -> list[User]:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_roles(*USER_ADMIN_ROLES))],
 )
-async def create_user(payload: schema.UserCreate, db: Session = Depends(get_db)) -> User:
-    return business_service.create_user(db, payload)
+async def create_user(
+    payload: schema.UserCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> User:
+    user, generated_password = business_service.create_user(db, payload)
+    # If we generated a default password, email it to the user with a login link.
+    if generated_password:
+        background_tasks.add_task(send_welcome_email, user.email, user.name, generated_password)
+    return user
 
 
 @router.patch(

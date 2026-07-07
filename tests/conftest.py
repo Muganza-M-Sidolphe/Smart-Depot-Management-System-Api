@@ -39,6 +39,19 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _disable_real_emails() -> Generator[None, None, None]:
+    """Never hit a real SMTP server during tests (emails fall back to logging)."""
+    from app.core.config import settings
+
+    original = settings.smtp_host
+    settings.smtp_host = ""
+    try:
+        yield
+    finally:
+        settings.smtp_host = original
+
+
 @pytest.fixture()
 async def public_client(db_session: Session) -> Generator[AsyncClient, None, None]:
     """Client with real authentication — used for auth and role-based tests."""

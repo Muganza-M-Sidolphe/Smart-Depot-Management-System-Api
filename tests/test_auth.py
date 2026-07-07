@@ -193,6 +193,41 @@ async def test_signup_accepts_six_char_password(public_client: AsyncClient) -> N
 
 
 @pytest.mark.anyio
+async def test_created_user_without_password_gets_generated_one_and_can_login(
+    public_client: AsyncClient, monkeypatch
+) -> None:
+    from app.services import business_service
+
+    sent: dict[str, str] = {}
+
+    monkeypatch.setattr(business_service, "generate_password", lambda: "Temp123abc")
+    # capture the welcome email instead of sending it
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.business.send_welcome_email",
+        lambda to, name, password: sent.update(to=to, name=name, password=password),
+    )
+
+    owner = await _token_for(public_client, "owner")
+    created = await public_client.post(
+        "/api/v1/users/",
+        json={"name": "Nopass", "email": "nopass@x.rw", "role": "cashier"},
+        headers=_auth(owner),
+    )
+    assert created.status_code == 201
+    assert "password" not in created.json()  # never leaked in the response
+
+    # the generated password was emailed with the user's login email
+    assert sent == {"to": "nopass@x.rw", "name": "Nopass", "password": "Temp123abc"}
+
+    # and it actually works for login
+    login = await public_client.post(
+        "/api/v1/auth/login",
+        json={"email": "nopass@x.rw", "password": "Temp123abc"},
+    )
+    assert login.status_code == 200
+
+
+@pytest.mark.anyio
 async def test_admin_created_user_with_password_can_login(public_client: AsyncClient) -> None:
     owner = await _token_for(public_client, "owner")
     created = await public_client.post(

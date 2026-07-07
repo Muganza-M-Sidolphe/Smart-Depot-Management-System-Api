@@ -197,9 +197,16 @@ Sending any other value returns 422.
 | Empty-case transactions & returns | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Expenses / Notifications / Audits / Depots | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 
-> Creating users via `POST /users/` now accepts an optional `password` — include
-> it so the created user can log in. Without it the account exists but cannot
-> authenticate. Password minimum length is **6** characters (signup and user creation).
+> **Creating users via `POST /users/`:** you do **not** need to send a password.
+> If you omit it, the backend generates a temporary password and **emails the new
+> user their credentials + a login link** automatically. You may still send a
+> `password` to set one explicitly (then no email is sent). Password minimum
+> length is **6** characters (signup and user creation).
+>
+> So the "add user" form only needs `name`, `email`, `role`, and optionally
+> `phone`. After creating, tell the admin the user will receive an email to log
+> in. (In dev, if SMTP isn't configured, the email — including the temp password —
+> is written to the backend logs instead of being sent.)
 
 If a user tries an action their role can't do, the API returns **403**:
 ```json

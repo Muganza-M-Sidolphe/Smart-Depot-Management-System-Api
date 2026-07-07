@@ -42,19 +42,37 @@ def create_record(db: Session, model: type[ModelT], payload: Any) -> ModelT:
     return record
 
 
-def create_user(db: Session, payload: schema.UserCreate) -> User:
-    """Create a user, hashing the password if one was supplied so they can log in."""
+def generate_password(length: int = 10) -> str:
+    """Generate a readable random password for a newly created account."""
+    import secrets
+    import string
+
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def create_user(db: Session, payload: schema.UserCreate) -> tuple[User, str | None]:
+    """Create a user and ensure they have a password so they can log in.
+
+    If the caller did not supply a password, a default one is generated and
+    returned (as plaintext) so the endpoint can email it to the user. The
+    returned password is None when the caller supplied their own.
+    """
     from app.core.security import hash_password
 
     data = payload.model_dump()
     password = data.pop("password", None)
+    generated: str | None = None
+    if not password:
+        password = generate_password()
+        generated = password
+
     user = User(**data)
-    if password:
-        user.password_hash = hash_password(password)
+    user.password_hash = hash_password(password)
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return user, generated
 
 
 _EXPENSE_RECEIPT_KEYS = ("receipt", "receipt_file_name", "receipt_file_type", "receipt_file_size", "notes")
