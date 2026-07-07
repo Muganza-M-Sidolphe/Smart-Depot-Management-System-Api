@@ -99,6 +99,65 @@ async def test_logout_requires_authentication(public_client: AsyncClient) -> Non
     assert (await public_client.post("/api/v1/auth/logout")).status_code == 401
 
 
+@pytest.mark.anyio
+async def test_forgot_and_reset_password_flow(public_client: AsyncClient, monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    # capture the reset link instead of emailing it, and pull the token out of it
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.auth.send_password_reset_email",
+        lambda to, name, reset_url, minutes: captured.update(to=to, url=reset_url),
+    )
+
+    await public_client.post("/api/v1/auth/signup", json=SIGNUP_PAYLOAD)  # eric@smartdepot.rw
+
+    # request a reset
+    forgot = await public_client.post(
+        "/api/v1/auth/forgot-password", json={"email": "eric@smartdepot.rw"}
+    )
+    assert forgot.status_code == 200
+    token = captured["url"].split("token=")[1]
+
+    # reset to a new password
+    reset = await public_client.post(
+        "/api/v1/auth/reset-password", json={"token": token, "newPassword": "brandnew123"},
+    )
+    assert reset.status_code == 200
+
+    # old password no longer works, new one does
+    old = await public_client.post(
+        "/api/v1/auth/login", json={"email": "eric@smartdepot.rw", "password": "supersecret123"}
+    )
+    assert old.status_code == 401
+    new = await public_client.post(
+        "/api/v1/auth/login", json={"email": "eric@smartdepot.rw", "password": "brandnew123"}
+    )
+    assert new.status_code == 200
+
+    # the same token cannot be reused
+    reuse = await public_client.post(
+        "/api/v1/auth/reset-password", json={"token": token, "newPassword": "another123"}
+    )
+    assert reuse.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_forgot_password_unknown_email_is_generic(public_client: AsyncClient) -> None:
+    # no account -> still 200 (does not reveal whether the email exists)
+    resp = await public_client.post(
+        "/api/v1/auth/forgot-password", json={"email": "nobody@nowhere.rw"}
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_reset_password_rejects_bad_token(public_client: AsyncClient) -> None:
+    resp = await public_client.post(
+        "/api/v1/auth/reset-password", json={"token": "not-a-real-token", "newPassword": "whatever123"}
+    )
+    assert resp.status_code == 400
+
+
 async def _token_for(public_client: AsyncClient, role: str) -> str:
     payload = {
         "name": f"{role.title()} User",

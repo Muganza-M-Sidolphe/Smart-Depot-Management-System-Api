@@ -47,3 +47,17 @@ class Token(APIModel):
     access_token: str
     token_type: str = "bearer"
     user: UserRead
+
+
+class ForgotPasswordRequest(APIModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def check_email(cls, value: str) -> str:
+        return _validate_email(value)
+
+
+class ResetPasswordRequest(APIModel):
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=6, max_length=128)

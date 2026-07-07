@@ -313,6 +313,37 @@ async function logout() {
 > user is logged out on this device regardless. And don't keep using the old
 > token after logout — request a fresh one by logging in again.
 
+### Forgot / reset password (public, no token)
+Two steps, both under `/auth`:
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/auth/forgot-password` | `{ email }` | 200 always (generic message) |
+| POST | `/auth/reset-password` | `{ token, newPassword }` | 200, or 400 if token invalid/expired |
+
+Flow:
+1. **Forgot-password page** → `POST /auth/forgot-password` with the email. The
+   response is always a generic 200 (`"If an account exists…"`) — it never reveals
+   whether the email is registered, so show that message regardless.
+2. The backend emails a link: `FRONTEND_URL/reset-password?token=<token>`
+   (token valid for `PASSWORD_RESET_EXPIRE_MINUTES`, default 60 min).
+3. **Build a `/reset-password` page** that reads `token` from the query string and
+   collects a new password (min 6), then `POST /auth/reset-password` with
+   `{ token, newPassword }`.
+4. On 200, redirect to `/login`. On 400, show "This reset link is invalid or has
+   expired" and let them request a new one. Tokens are single-use.
+
+```js
+// forgot-password page
+await api.post("/auth/forgot-password", { email });
+// always show: "If an account exists for that email, a reset link has been sent."
+
+// reset-password page (token from URL ?token=...)
+const token = new URLSearchParams(location.search).get("token");
+await api.post("/auth/reset-password", { token, newPassword });
+// on success -> go to /login
+```
+
 ---
 
 ## 11. Newly supported request fields (inventory, sales, expenses)

@@ -27,6 +27,10 @@ class Settings(BaseSettings):
         default=60 * 24,
         validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    password_reset_expire_minutes: int = Field(
+        default=60,
+        validation_alias="PASSWORD_RESET_EXPIRE_MINUTES",
+    )
     upload_dir: str = Field(default="uploads", validation_alias="UPLOAD_DIR")
     public_base_url: str = Field(
         default="http://127.0.0.1:8000",

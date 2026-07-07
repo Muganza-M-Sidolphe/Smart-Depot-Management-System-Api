@@ -60,6 +60,27 @@ def send_email(
         logger.exception("Failed to send email to %s", ", ".join(recipients))
 
 
+def send_password_reset_email(to: str, name: str, reset_url: str, expire_minutes: int) -> None:
+    """Email a user a password-reset link."""
+    subject = f"Reset your {settings.app_name} password"
+    body = (
+        f"Hi {name or 'there'},\n\n"
+        f"We received a request to reset your password.\n\n"
+        f"Reset it here (link valid for {expire_minutes} minutes):\n{reset_url}\n\n"
+        f"If you did not request this, you can safely ignore this email — your "
+        f"password will not change.\n"
+    )
+    html = (
+        f"<p>Hi {name or 'there'},</p>"
+        f"<p>We received a request to reset your password.</p>"
+        f'<p><a href="{reset_url}">Reset your password</a> '
+        f"(valid for {expire_minutes} minutes).</p>"
+        f"<p>If you did not request this, you can safely ignore this email — your "
+        f"password will not change.</p>"
+    )
+    send_email(to, subject, body, html)
+
+
 def send_welcome_email(to: str, name: str, password: str) -> None:
     """Email a newly created user their temporary password and a login link."""
     login_url = f"{settings.frontend_url.rstrip('/')}/login"
