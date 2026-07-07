@@ -1,4 +1,5 @@
 from functools import lru_cache
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,6 +44,17 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
     email_from: str = Field(default="no-reply@smartdepot.local", validation_alias="EMAIL_FROM")
     email_from_name: str = Field(default="Smart Depot", validation_alias="EMAIL_FROM_NAME")
+
+    # Automatic report scheduler (APScheduler, in-process)
+    enable_scheduler: bool = Field(default=True, validation_alias="ENABLE_SCHEDULER")
+    # IANA timezone used for report scheduling (send_hour) and display labels.
+    timezone: str = Field(default="Africa/Kigali", validation_alias="TIMEZONE")
+
+    def tzinfo(self) -> ZoneInfo:
+        try:
+            return ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            return ZoneInfo("UTC")
 
     @property
     def emails_enabled(self) -> bool:

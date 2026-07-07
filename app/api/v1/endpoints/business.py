@@ -1,8 +1,9 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
 from app.core.email import send_welcome_email
+from app.core.pdf import build_report_pdf
 from app.core.roles import MANAGEMENT, OPERATIONS_ROLES, SALES_ROLES, STOCK_ROLES, USER_ADMIN_ROLES
 from app.models.business import (
     Activity,
@@ -10,12 +11,13 @@ from app.models.business import (
     Expense,
     Notification,
     Product,
+    ReportSettings,
     Supplier,
     TransactionAudit,
     User,
 )
 from app.schemas import business as schema
-from app.services import business_service
+from app.services import business_service, report_service
 
 router = APIRouter()
 
@@ -379,3 +381,64 @@ async def create_transaction_audit(payload: schema.TransactionAuditCreate, db: S
 @router.get("/reports/dashboard", response_model=schema.DashboardReport)
 async def get_dashboard_report(db: Session = Depends(get_db)) -> schema.DashboardReport:
     return business_service.dashboard_report(db)
+
+
+def _validate_period(period: str) -> str:
+    if period not in report_service.PERIODS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"period must be one of {', '.join(report_service.PERIODS)}",
+        )
+    return period
+
+
+@router.get("/reports/settings", response_model=schema.ReportSettingsRead)
+async def get_report_settings(db: Session = Depends(get_db)) -> ReportSettings:
+    return report_service.get_or_create_settings(db)
+
+
+@router.put(
+    "/reports/settings",
+    response_model=schema.ReportSettingsRead,
+    dependencies=[Depends(require_roles(*USER_ADMIN_ROLES))],
+)
+async def update_report_settings(
+    payload: schema.ReportSettingsUpdate, db: Session = Depends(get_db)
+) -> ReportSettings:
+    settings_row = report_service.get_or_create_settings(db)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(settings_row, key, value)
+    settings_row.updated_at = business_service.utcnow()
+    db.commit()
+    db.refresh(settings_row)
+    return settings_row
+
+
+@router.get(
+    "/reports/{period}/pdf",
+    dependencies=[Depends(require_roles(*MANAGEMENT))],
+)
+async def download_report_pdf(period: str, db: Session = Depends(get_db)) -> Response:
+    period = _validate_period(period)
+    data = report_service.period_report(db, period)
+    pdf_bytes = build_report_pdf(data)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{period}-report.pdf"'},
+    )
+
+
+@router.post(
+    "/reports/send",
+    response_model=schema.ReportSendResult,
+    dependencies=[Depends(require_roles(*USER_ADMIN_ROLES))],
+)
+async def send_report_now(
+    db: Session = Depends(get_db),
+    period: str = Query(default="daily"),
+    recipients: list[str] | None = Query(default=None),
+) -> schema.ReportSendResult:
+    period = _validate_period(period)
+    result = report_service.generate_and_send(db, period, recipients=recipients)
+    return schema.ReportSendResult.model_validate(result)

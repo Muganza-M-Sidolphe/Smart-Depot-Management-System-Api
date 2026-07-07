@@ -423,3 +423,46 @@ class DashboardReport(APIModel):
     pending_empty_cases: int
     refundable_deposits: float
     recent_activities: list[ActivityRead]
+
+
+class ReportSettingsUpdate(APIModel):
+    recipients: list[str] | None = None
+    whatsapp_number: str | None = None
+    daily_enabled: bool | None = None
+    weekly_enabled: bool | None = None
+    monthly_enabled: bool | None = None
+    send_hour: int | None = Field(default=None, ge=0, le=23)
+    weekly_weekday: int | None = Field(default=None, ge=0, le=6)
+    monthly_day: int | None = Field(default=None, ge=1, le=28)
+
+
+class ReportMetrics(APIModel):
+    sales_count: int
+    revenue: float
+    expenses: float
+    profit: float
+    cases_sold: int
+
+
+class ReportSendResult(APIModel):
+    period: str
+    recipients: list[str]
+    emailed: bool
+    pdf_bytes: int
+    metrics: ReportMetrics
+
+
+class ReportSettingsRead(APIModel):
+    id: int
+    recipients: list[str] = []
+    whatsapp_number: str | None = None
+    daily_enabled: bool
+    weekly_enabled: bool
+    monthly_enabled: bool
+    send_hour: int
+    weekly_weekday: int
+    monthly_day: int
+    last_daily_sent: datetime | None = None
+    last_weekly_sent: datetime | None = None
+    last_monthly_sent: datetime | None = None
+    updated_at: datetime

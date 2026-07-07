@@ -351,3 +351,45 @@ directly in an `<img>`/link) and `receiptFileName`. Invalid base64 returns 400.
 > endpoints in the services (`/sales/daily-summary`, `/expenses/summary/category`,
 > `/products/low-stock`, `/products/{id}/stock`, `PATCH`/`DELETE /sales/{id}`, etc.).
 > Keep computing those client-side for now, or ask the backend team to add them.
+
+---
+
+## 12. Automatic PDF reports by email
+
+The backend can email a **PDF business report** (daily / weekly / monthly) to
+configured recipients, automatically on a schedule. All endpoints are under
+`/reports` and require a token; settings/sending require **owner or admin**.
+
+| Method | Path | Role | Purpose |
+|---|---|---|---|
+| GET | `/reports/settings` | any logged-in | Current schedule + recipients |
+| PUT | `/reports/settings` | owner/admin | Update schedule + recipients |
+| GET | `/reports/{period}/pdf` | manager+ | Download the PDF (`period` = `daily`/`weekly`/`monthly`) |
+| POST | `/reports/send?period=daily` | owner/admin | Generate + email the report **now** (optionally `&recipients=a@x.com`) |
+
+### Settings shape (`GET`/`PUT /reports/settings`)
+```json
+{
+  "recipients": ["boss@depot.rw", "owner@depot.rw"],
+  "whatsappNumber": null,
+  "dailyEnabled": true,
+  "weeklyEnabled": false,
+  "monthlyEnabled": true,
+  "sendHour": 8,          // 0-23, in the server's configured timezone (default Africa/Kigali, UTC+2)
+  "weeklyWeekday": 0,     // 0=Mon … 6=Sun
+  "monthlyDay": 1         // 1-28
+}
+```
+`PUT` accepts any subset of those fields. When a period is enabled and has
+recipients, the server emails the PDF automatically at `sendHour` (daily), on
+`weeklyWeekday` (weekly), and on `monthlyDay` (monthly).
+
+### Build a "Reports settings" screen
+- Load current values with `GET /reports/settings`.
+- Let the admin edit recipients (email list), toggles, and times → `PUT`.
+- Add a **"Send test report now"** button → `POST /reports/send?period=daily`.
+- Add **"Download PDF"** links → `GET /reports/{period}/pdf` (opens/downloads the PDF).
+
+> `whatsappNumber` is accepted and stored now but not yet used — WhatsApp delivery
+> is a planned follow-up. To actually send emails, the backend needs SMTP
+> configured (`.env`); otherwise reports are logged instead of sent.

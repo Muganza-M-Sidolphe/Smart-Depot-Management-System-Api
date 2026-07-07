@@ -177,6 +177,26 @@ class Expense(Base):
     receipt_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
+class ReportSettings(Base):
+    """Single-row (id=1) configuration for automatic report delivery."""
+
+    __tablename__ = "report_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    recipients: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list of emails
+    whatsapp_number: Mapped[str | None] = mapped_column(String(40), nullable=True)  # future use
+    daily_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    weekly_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    monthly_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    send_hour: Mapped[int] = mapped_column(Integer, default=8, nullable=False)  # 0-23, server time
+    weekly_weekday: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 0=Mon..6=Sun
+    monthly_day: Mapped[int] = mapped_column(Integer, default=1, nullable=False)  # 1-28
+    last_daily_sent: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_weekly_sent: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_monthly_sent: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
 class Activity(Base):
     __tablename__ = "activities"
 

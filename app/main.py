@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,8 +9,20 @@ from sqlalchemy import inspect, text
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.scheduler import shutdown_scheduler, start_scheduler
 from app.db.session import Base, engine
 from app import models  # noqa: F401
+
+
+@asynccontextmanager
+async def lifespan(app: "FastAPI"):
+    if settings.enable_scheduler:
+        start_scheduler()
+    try:
+        yield
+    finally:
+        if settings.enable_scheduler:
+            shutdown_scheduler()
 
 
 def ensure_schema() -> None:
@@ -42,6 +55,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         debug=settings.debug,
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
