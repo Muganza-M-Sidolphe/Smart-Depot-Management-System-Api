@@ -25,6 +25,22 @@ async def lifespan(app: "FastAPI"):
             shutdown_scheduler()
 
 
+def _scalar_default_sql(column) -> str | None:
+    """SQL literal for a column's scalar default, used to backfill added columns."""
+    default = column.default
+    if default is None or not getattr(default, "is_scalar", False):
+        return None
+    value = default.arg
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("'", "''")
+        return f"'{escaped}'"
+    return None
+
+
 def ensure_schema() -> None:
     """Add columns introduced after a table was first created.
 
@@ -46,6 +62,10 @@ def ensure_schema() -> None:
                 continue
             column_type = column.type.compile(dialect=engine.dialect)
             ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column_type}'
+            # Backfill a default so existing rows don't get NULL in a NOT NULL column.
+            literal = _scalar_default_sql(column)
+            if literal is not None:
+                ddl += f" DEFAULT {literal}"
             with engine.begin() as connection:
                 connection.execute(text(ddl))
 

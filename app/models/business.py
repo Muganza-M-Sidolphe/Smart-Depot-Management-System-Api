@@ -138,10 +138,31 @@ class Sale(Base):
     returned_empties: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     invoice_number: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="completed", nullable=False)
+    # "paid" | "partial" | "unpaid" — settlement state of this sale
+    payment_status: Mapped[str] = mapped_column(String(20), default="paid", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
     customer: Mapped[Customer | None] = relationship(back_populates="sales")
     items: Mapped[list["SaleItem"]] = relationship(back_populates="sale", cascade="all, delete-orphan")
+    payments: Mapped[list["SalePayment"]] = relationship(
+        back_populates="sale", cascade="all, delete-orphan", order_by="SalePayment.id"
+    )
+
+
+class SalePayment(Base):
+    """An individual payment made toward a sale (supports installments)."""
+
+    __tablename__ = "sale_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    method: Mapped[str] = mapped_column(String(40), default="cash", nullable=False)
+    received_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    sale: Mapped[Sale] = relationship(back_populates="payments")
 
 
 class SaleItem(Base):

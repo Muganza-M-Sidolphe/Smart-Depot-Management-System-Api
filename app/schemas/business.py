@@ -195,6 +195,23 @@ class SaleItemRead(APIModel):
     remaining_empty_cases: int = 0
 
 
+class SalePaymentCreate(APIModel):
+    amount: float = Field(gt=0)
+    method: str = "cash"
+    received_by: str
+    note: str | None = None
+
+
+class SalePaymentRead(APIModel):
+    id: int
+    sale_id: int
+    amount: float
+    method: str
+    received_by: str
+    note: str | None = None
+    created_at: datetime
+
+
 class SaleCreate(APIModel):
     customer_id: int | None = None
     customer_name: str
@@ -231,7 +248,25 @@ class SaleRead(APIModel):
     remaining_empty_cases_total: int
     invoice_number: str
     status: str
+    payment_status: str
+    payments: list[SalePaymentRead] = []
     created_at: datetime
+
+    @field_validator(
+        "tax",
+        "remaining_balance",
+        "empty_cases_total",
+        "remaining_empty_cases_total",
+        "is_partial_payment",
+        "payment_status",
+        mode="before",
+    )
+    @classmethod
+    def _fill_none(cls, value: object, info) -> object:
+        # Older rows (migrated) may be NULL for these newer columns.
+        if value is not None:
+            return value
+        return {"payment_status": "paid", "is_partial_payment": False}.get(info.field_name, 0)
 
 
 class ExpenseBase(APIModel):

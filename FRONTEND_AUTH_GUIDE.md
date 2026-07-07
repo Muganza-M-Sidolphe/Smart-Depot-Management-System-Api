@@ -394,6 +394,35 @@ server calculates them):
 
 Payment values: `cash`, `mobile`, `card`, `bank`.
 
+#### Full vs partial payment + paying off the balance
+Every sale now has a **`paymentStatus`**: `"paid"`, `"partial"`, or `"unpaid"`, and a
+**`payments`** array (the ledger of amounts received, including the amount paid at
+the point of sale).
+
+- **Full payment:** send `amountPaid >= total` (and omit/false `isPartialPayment`) → `paymentStatus: "paid"`, `remainingBalance: 0`.
+- **Partial payment:** send `isPartialPayment: true` with `amountPaid` less than the total → `paymentStatus: "partial"`, `remainingBalance` = what's still owed, and the customer's `unpaidBalance` goes up by that amount.
+
+**Record later payments until the balance is cleared:**
+
+| Method | Path | Role | Purpose |
+|---|---|---|---|
+| POST | `/sales/{id}/payments` | sales roles | Record a payment toward the balance |
+| GET | `/sales/{id}/payments` | any logged-in | The payment ledger for a sale |
+| GET | `/sales/outstanding` | any logged-in | All sales with a balance still owed (receivables) |
+
+`POST /sales/{id}/payments` body:
+```json
+{ "amount": 40000, "method": "cash", "receivedBy": "Aline", "note": "optional" }
+```
+It returns the **updated sale** (new `amountPaid`, `remainingBalance`, `paymentStatus`,
+and the appended `payments`). When the last payment clears the balance,
+`paymentStatus` becomes `"paid"`, `remainingBalance` is `0`, and the customer's
+`unpaidBalance` is reduced accordingly. Errors: **400** if the sale is already
+paid or the amount exceeds the remaining balance.
+
+Build a "Record payment" button on partial/unpaid sales, and an "Outstanding /
+receivables" screen from `GET /sales/outstanding`.
+
 ### Expenses — `POST/PATCH /expenses/`
 Now stored: `description`, `paymentMethod`, `dueDate`, `receiptNumber`,
 `quantity`, `unitPrice`, `createdBy`, `updatedBy`. The `notes` field is accepted

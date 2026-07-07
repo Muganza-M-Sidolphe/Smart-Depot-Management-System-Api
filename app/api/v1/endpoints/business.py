@@ -213,9 +213,38 @@ async def create_sale(payload: schema.SaleCreate, db: Session = Depends(get_db))
     return business_service.create_sale(db, payload)
 
 
+@router.get("/sales/outstanding", response_model=list[schema.SaleRead])
+async def list_outstanding_sales(db: Session = Depends(get_db)):
+    """Sales that still have an unpaid balance (accounts receivable)."""
+    return business_service.list_outstanding_sales(db)
+
+
 @router.get("/sales/{record_id}", response_model=schema.SaleRead)
 async def get_sale(record_id: int, db: Session = Depends(get_db)):
     record = business_service.get_sale(db, record_id)
+    if record is None:
+        raise not_found("Sale")
+    return record
+
+
+@router.get("/sales/{record_id}/payments", response_model=list[schema.SalePaymentRead])
+async def list_sale_payments(record_id: int, db: Session = Depends(get_db)):
+    payments = business_service.list_sale_payments(db, record_id)
+    if payments is None:
+        raise not_found("Sale")
+    return payments
+
+
+@router.post(
+    "/sales/{record_id}/payments",
+    response_model=schema.SaleRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles(*SALES_ROLES))],
+)
+async def record_sale_payment(
+    record_id: int, payload: schema.SalePaymentCreate, db: Session = Depends(get_db)
+):
+    record = business_service.record_sale_payment(db, record_id, payload)
     if record is None:
         raise not_found("Sale")
     return record

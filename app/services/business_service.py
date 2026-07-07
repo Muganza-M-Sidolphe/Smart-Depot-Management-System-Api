@@ -15,6 +15,7 @@ from app.models.business import (
     Product,
     Sale,
     SaleItem,
+    SalePayment,
     Supplier,
     SupplierReturn,
     TransactionAudit,
@@ -290,6 +291,7 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
     if not payload.is_partial_payment:
         remaining_balance = 0.0
 
+    amount_toward_sale = min(payload.amount_paid, total)
     sale.subtotal = subtotal
     sale.tax = tax_amount
     sale.total = total
@@ -299,6 +301,21 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
     sale.empty_cases_total = returned_empties
     sale.remaining_empty_cases_total = pending_empties
     sale.remaining_balance = remaining_balance
+    sale.payment_status = (
+        "paid" if remaining_balance <= 0 else ("unpaid" if amount_toward_sale <= 0 else "partial")
+    )
+
+    # Record the amount paid at the point of sale as the first payment.
+    if amount_toward_sale > 0:
+        db.add(
+            SalePayment(
+                sale_id=sale.id,
+                amount=amount_toward_sale,
+                method=payload.payment,
+                received_by=payload.cashier,
+                note="Payment at point of sale",
+            )
+        )
 
     if payload.customer_id is not None:
         customer = db.get(Customer, payload.customer_id)
@@ -322,12 +339,87 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
 
 def get_sale(db: Session, sale_id: int) -> Sale | None:
     return db.scalars(
-        select(Sale).options(selectinload(Sale.items)).where(Sale.id == sale_id)
+        select(Sale)
+        .options(selectinload(Sale.items), selectinload(Sale.payments))
+        .where(Sale.id == sale_id)
     ).first()
 
 
 def list_sales(db: Session) -> list[Sale]:
-    return list(db.scalars(select(Sale).options(selectinload(Sale.items)).order_by(Sale.id.desc())))
+    return list(
+        db.scalars(
+            select(Sale)
+            .options(selectinload(Sale.items), selectinload(Sale.payments))
+            .order_by(Sale.id.desc())
+        )
+    )
+
+
+def list_outstanding_sales(db: Session) -> list[Sale]:
+    """Sales that still have an unpaid balance (for a receivables view)."""
+    return list(
+        db.scalars(
+            select(Sale)
+            .options(selectinload(Sale.items), selectinload(Sale.payments))
+            .where(Sale.remaining_balance > 0)
+            .order_by(Sale.id.desc())
+        )
+    )
+
+
+def list_sale_payments(db: Session, sale_id: int) -> list[SalePayment] | None:
+    if db.get(Sale, sale_id) is None:
+        return None
+    return list(
+        db.scalars(select(SalePayment).where(SalePayment.sale_id == sale_id).order_by(SalePayment.id))
+    )
+
+
+def record_sale_payment(db: Session, sale_id: int, payload: schema.SalePaymentCreate) -> Sale | None:
+    """Record a payment toward a sale's outstanding balance (installments)."""
+    sale = db.get(Sale, sale_id)
+    if sale is None:
+        return None
+    if sale.remaining_balance <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This sale is already fully paid",
+        )
+    if payload.amount > sale.remaining_balance + 1e-9:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Amount exceeds the remaining balance of {sale.remaining_balance:.0f}",
+        )
+
+    sale.amount_paid += payload.amount
+    sale.remaining_balance = round(max(0.0, sale.total - sale.amount_paid), 2)
+    sale.is_partial_payment = sale.remaining_balance > 0
+    sale.payment_status = "paid" if sale.remaining_balance <= 0 else "partial"
+
+    db.add(
+        SalePayment(
+            sale_id=sale.id,
+            amount=payload.amount,
+            method=payload.method,
+            received_by=payload.received_by,
+            note=payload.note,
+        )
+    )
+
+    if sale.customer_id is not None:
+        customer = db.get(Customer, sale.customer_id)
+        if customer is not None:
+            customer.unpaid_balance = round(max(0.0, customer.unpaid_balance - payload.amount), 2)
+            customer.updated_at = utcnow()
+
+    create_activity(
+        db,
+        "sale",
+        f"{payload.received_by} received {payload.amount:.0f} payment for {sale.receipt_no} "
+        f"({sale.payment_status})",
+    )
+    db.commit()
+    return get_sale(db, sale.id)
 
 
 def create_empty_case_transaction(
