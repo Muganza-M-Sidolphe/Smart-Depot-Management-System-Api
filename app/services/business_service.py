@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Any, TypeVar
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.business import (
@@ -620,3 +620,271 @@ def dashboard_report(db: Session) -> schema.DashboardReport:
         refundable_deposits=refundable_deposits,
         recent_activities=activities,
     )
+
+
+# ---------------------------------------------------------------------------
+# Generic filter / search helpers used by the "extras" endpoints
+# ---------------------------------------------------------------------------
+
+
+def filter_records(db: Session, model: type[ModelT], **filters: Any) -> list[ModelT]:
+    stmt = select(model)
+    for key, value in filters.items():
+        stmt = stmt.where(getattr(model, key) == value)
+    if hasattr(model, "id"):
+        stmt = stmt.order_by(model.id.desc())  # type: ignore[attr-defined]
+    return list(db.scalars(stmt))
+
+
+def search_records(db: Session, model: type[ModelT], columns: list[str], q: str) -> list[ModelT]:
+    like = f"%{q}%"
+    conditions = [getattr(model, c).ilike(like) for c in columns]
+    stmt = select(model).where(or_(*conditions)).order_by(model.id.desc())  # type: ignore[attr-defined]
+    return list(db.scalars(stmt))
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Products
+# ---------------------------------------------------------------------------
+
+
+def low_stock_products(db: Session, threshold: int | None = None) -> list[Product]:
+    products = list(db.scalars(select(Product)))
+    if threshold is None:
+        return [p for p in products if p.full_cases <= p.low_stock_threshold]
+    return [p for p in products if p.full_cases <= threshold]
+
+
+def product_by_barcode(db: Session, code: str) -> Product | None:
+    return db.scalars(select(Product).where(Product.batch_number == code)).first()
+
+
+def adjust_product_stock(db: Session, product_id: int, quantity: int, operation: str) -> Product | None:
+    product = db.get(Product, product_id)
+    if product is None:
+        return None
+    if operation == "add":
+        product.full_cases += quantity
+    elif operation == "subtract":
+        product.full_cases = max(0, product.full_cases - quantity)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="operation must be 'add' or 'subtract'")
+    product.updated_at = utcnow()
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+def bulk_update_products(db: Session, items: list[Any]) -> list[Product]:
+    updated: list[Product] = []
+    for item in items:
+        record = update_record(db, Product, item.id, item.data)
+        if record is not None:
+            updated.append(record)
+    return updated
+
+
+# ---------------------------------------------------------------------------
+# Sales
+# ---------------------------------------------------------------------------
+
+
+def _sales_query():
+    return select(Sale).options(selectinload(Sale.items), selectinload(Sale.payments))
+
+
+def sales_by_customer(db: Session, customer_id: int) -> list[Sale]:
+    return list(db.scalars(_sales_query().where(Sale.customer_id == customer_id).order_by(Sale.id.desc())))
+
+
+def sales_by_date_range(db: Session, start: datetime | None, end: datetime | None) -> list[Sale]:
+    stmt = _sales_query()
+    if start:
+        stmt = stmt.where(Sale.created_at >= start)
+    if end:
+        stmt = stmt.where(Sale.created_at <= end)
+    return list(db.scalars(stmt.order_by(Sale.id.desc())))
+
+
+def daily_sales_summary(db: Session, day: datetime) -> dict[str, Any]:
+    start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    sales = list(db.scalars(select(Sale).where(Sale.created_at >= start, Sale.created_at < end)))
+    total = sum(s.total for s in sales)
+    count = len(sales)
+    methods: dict[str, float] = {}
+    for s in sales:
+        methods[s.payment] = methods.get(s.payment, 0.0) + s.total
+    return {
+        "total_sales": total,
+        "total_transactions": count,
+        "average_transaction": (total / count) if count else 0.0,
+        "payment_methods": methods,
+    }
+
+
+def update_sale(db: Session, sale_id: int, payload: Any) -> Sale | None:
+    sale = db.get(Sale, sale_id)
+    if sale is None:
+        return None
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(sale, key, value)
+    db.commit()
+    return get_sale(db, sale_id)
+
+
+def delete_sale(db: Session, sale_id: int) -> bool:
+    sale = db.scalars(select(Sale).options(selectinload(Sale.items)).where(Sale.id == sale_id)).first()
+    if sale is None:
+        return False
+
+    refund_reversal = 0.0
+    for item in sale.items:
+        product = db.get(Product, item.product_id)
+        if product is not None:
+            product.full_cases += item.quantity  # restore stock
+            refund_reversal += item.remaining_empty_cases * product.deposit_amount
+
+    if sale.customer_id is not None:
+        customer = db.get(Customer, sale.customer_id)
+        if customer is not None:
+            customer.total_purchases = max(0.0, customer.total_purchases - sale.total)
+            customer.total_spent = max(0.0, customer.total_spent - sale.total)
+            customer.total_transactions = max(0, customer.total_transactions - 1)
+            customer.pending_empties = max(0, customer.pending_empties - sale.remaining_empty_cases_total)
+            customer.unpaid_balance = max(0.0, customer.unpaid_balance - sale.remaining_balance)
+            customer.refundable_deposits = max(0.0, customer.refundable_deposits - refund_reversal)
+            customer.updated_at = utcnow()
+
+    db.delete(sale)  # cascades sale_items + sale_payments
+    db.commit()
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Expenses
+# ---------------------------------------------------------------------------
+
+
+def _expenses_in_range(db: Session, start: datetime | None, end: datetime | None) -> list[Expense]:
+    stmt = select(Expense)
+    if start:
+        stmt = stmt.where(Expense.date >= start)
+    if end:
+        stmt = stmt.where(Expense.date <= end)
+    return list(db.scalars(stmt.order_by(Expense.id.desc())))
+
+
+def expenses_summary_by_category(db: Session, start: datetime | None, end: datetime | None) -> list[dict[str, Any]]:
+    rows = _expenses_in_range(db, start, end)
+    total_all = sum(e.amount for e in rows)
+    agg: dict[str, dict[str, Any]] = {}
+    for e in rows:
+        bucket = agg.setdefault(e.category, {"category": e.category, "total": 0.0, "count": 0})
+        bucket["total"] += e.amount
+        bucket["count"] += 1
+    result = []
+    for bucket in agg.values():
+        bucket["percentage"] = (bucket["total"] / total_all * 100) if total_all else 0.0
+        result.append(bucket)
+    return sorted(result, key=lambda b: b["total"], reverse=True)
+
+
+def expenses_total(db: Session, start: datetime | None, end: datetime | None) -> dict[str, Any]:
+    rows = _expenses_in_range(db, start, end)
+    total = sum(e.amount for e in rows)
+    count = len(rows)
+    return {"total": total, "count": count, "average": (total / count) if count else 0.0}
+
+
+def expenses_monthly_breakdown(db: Session, year: int) -> list[dict[str, Any]]:
+    rows = list(db.scalars(select(Expense)))
+    months: dict[str, dict[str, Any]] = {}
+    for e in rows:
+        if e.date.year != year:
+            continue
+        key = f"{year}-{e.date.month:02d}"
+        bucket = months.setdefault(key, {"month": key, "total": 0.0, "categories": {}})
+        bucket["total"] += e.amount
+        bucket["categories"][e.category] = bucket["categories"].get(e.category, 0.0) + e.amount
+    return [months[k] for k in sorted(months)]
+
+
+# ---------------------------------------------------------------------------
+# Customers
+# ---------------------------------------------------------------------------
+
+
+def customer_by_phone(db: Session, phone: str) -> Customer | None:
+    return db.scalars(select(Customer).where(Customer.phone == phone)).first()
+
+
+def customer_stats(db: Session, customer_id: int) -> dict[str, Any] | None:
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        return None
+    return {
+        "total_spent": customer.total_spent,
+        "total_transactions": customer.total_transactions,
+        "pending_empties": customer.pending_empties,
+        "unpaid_balance": customer.unpaid_balance,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+
+def notifications_unread(db: Session) -> list[Notification]:
+    return list(db.scalars(select(Notification).where(Notification.read == 0).order_by(Notification.id.desc())))
+
+
+def notifications_count(db: Session) -> dict[str, int]:
+    total = db.scalar(select(func.count(Notification.id))) or 0
+    unread = db.scalar(select(func.count(Notification.id)).where(Notification.read == 0)) or 0
+    return {"total": total, "unread": unread}
+
+
+def notification_set_read(db: Session, notification_id: int, read: int = 1) -> Notification | None:
+    notification = db.get(Notification, notification_id)
+    if notification is None:
+        return None
+    notification.read = read
+    db.commit()
+    db.refresh(notification)
+    return notification
+
+
+def notifications_mark_all_read(db: Session) -> list[Notification]:
+    notifications = list(db.scalars(select(Notification)))
+    for n in notifications:
+        n.read = 1
+    db.commit()
+    return notifications
+
+
+def delete_read_notifications(db: Session) -> int:
+    read_ones = list(db.scalars(select(Notification).where(Notification.read == 1)))
+    for n in read_ones:
+        db.delete(n)
+    db.commit()
+    return len(read_ones)
+
+
+# ---------------------------------------------------------------------------
+# Activities
+# ---------------------------------------------------------------------------
+
+
+def activities_recent(db: Session, limit: int = 10) -> list[Activity]:
+    return list(db.scalars(select(Activity).order_by(Activity.id.desc()).limit(limit)))

@@ -526,3 +526,91 @@ class ReportSettingsRead(APIModel):
     last_weekly_sent: datetime | None = None
     last_monthly_sent: datetime | None = None
     updated_at: datetime
+
+
+# --- Schemas for the "extras" endpoints (filters, summaries, stock, bulk) ---
+
+
+class ProductStockAdjust(APIModel):
+    quantity: int = Field(gt=0)
+    operation: str  # "add" | "subtract"
+
+
+class ProductBulkItem(APIModel):
+    id: int
+    data: ProductUpdate
+
+
+class ProductBulkUpdate(APIModel):
+    products: list[ProductBulkItem]
+
+
+class SaleUpdate(APIModel):
+    status: str | None = None
+    payment_status: str | None = None
+
+
+class DailySalesSummary(APIModel):
+    total_sales: float
+    total_transactions: int
+    average_transaction: float
+    payment_methods: dict[str, float]
+
+
+class ExpenseCategorySummary(APIModel):
+    category: str
+    total: float
+    count: int
+    percentage: float
+
+
+class ExpenseTotalSummary(APIModel):
+    total: float
+    count: int
+    average: float
+
+
+class ExpenseMonthlyBreakdown(APIModel):
+    month: str
+    total: float
+    categories: dict[str, float]
+
+
+class CustomerStats(APIModel):
+    total_spent: float
+    total_transactions: int
+    pending_empties: int
+    unpaid_balance: float
+
+
+class NotificationCount(APIModel):
+    total: int
+    unread: int
+
+
+class DamagedCaseUpdate(APIModel):
+    product_id: int | None = None
+    product_name: str | None = None
+    quantity: int | None = None
+    reason: str | None = None
+    damage_cost: float | None = None
+    reported_date: datetime | None = None
+    reported_by: str | None = None
+    notes: str | None = None
+
+
+class SupplierReturnUpdate(APIModel):
+    supplier_id: int | None = None
+    supplier_name: str | None = None
+    product_id: int | None = None
+    product_name: str | None = None
+    quantity: int | None = None
+    receipt_number: str | None = None
+    returned_date: datetime | None = None
+    received_by: str | None = None
+    notes: str | None = None
+
+
+class ActivityUpdate(APIModel):
+    type: str | None = None
+    message: str | None = None

@@ -113,3 +113,46 @@ def build_report_pdf(data: dict[str, Any]) -> bytes:
 
     out = pdf.output()
     return bytes(out)
+
+
+def build_expenses_pdf(expenses: list, start_label: str, end_label: str) -> bytes:
+    """Render a simple expenses report (list + total) to PDF bytes."""
+    pdf = _ReportPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 10, "Expenses Report", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*_MUTED)
+    pdf.cell(0, 6, f"Period: {start_label} - {end_label}", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    # header row
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(*_PRIMARY)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(28, 8, "  Date", fill=True)
+    pdf.cell(70, 8, "Title", fill=True)
+    pdf.cell(45, 8, "Category", fill=True)
+    pdf.cell(0, 8, "Amount", fill=True, align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+
+    total = 0.0
+    for i, e in enumerate(expenses):
+        total += e.amount
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_fill_color(*_LIGHT)
+        fill = i % 2 == 0
+        pdf.cell(28, 7, f"  {e.date:%Y-%m-%d}", fill=fill)
+        pdf.cell(70, 7, (e.title or "")[:38], fill=fill)
+        pdf.cell(45, 7, (e.category or "")[:22], fill=fill)
+        pdf.cell(0, 7, _money(e.amount), fill=fill, align="R", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(143, 8, "  Total")
+    pdf.cell(0, 8, _money(total), align="R", new_x="LMARGIN", new_y="NEXT")
+
+    return bytes(pdf.output())

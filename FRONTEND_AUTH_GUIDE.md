@@ -438,10 +438,20 @@ and maps onto `note`.
 backend stores it and returns **`receiptUrl`** (a fully-qualified URL you can use
 directly in an `<img>`/link) and `receiptFileName`. Invalid base64 returns 400.
 
-> Still not implemented (calling these will 404): the analytics/filter helper
-> endpoints in the services (`/sales/daily-summary`, `/expenses/summary/category`,
-> `/products/low-stock`, `/products/{id}/stock`, `PATCH`/`DELETE /sales/{id}`, etc.).
-> Keep computing those client-side for now, or ask the backend team to add them.
+> **All the service-layer endpoints are now implemented** — every `api.*` call in
+> the frontend `services/` has a matching backend route (100% coverage). This
+> includes the filters/summaries/search/stock helpers that were previously
+> missing: `/products/low-stock`, `/products/search`, `/products/category/{c}`,
+> `/products/barcode/{code}`, `PATCH /products/{id}/stock`, `PATCH /products/bulk`,
+> `/sales/customer/{id}`, `/sales/date-range`, `/sales/daily-summary/{date}`,
+> `PATCH`/`DELETE /sales/{id}`, `/expenses/{id}`, `/expenses/date-range`,
+> `/expenses/category/{c}`, `/expenses/payment-method/{m}`,
+> `/expenses/summary/category`, `/expenses/total`, `/expenses/monthly-breakdown`,
+> `/expenses/report` (PDF), `/customers/phone/{phone}`, `/customers/{id}/stats`,
+> `/suppliers/{id}`, `/suppliers/search`, the notification read/dismiss/count/
+> filter endpoints, activity/damaged-case/supplier-return/audit fetch+filters,
+> and empty-case `pending`/`customer/{id}`/get/update/delete. Note: `DELETE /sales/{id}`
+> restores product stock and reverses the customer's balances.
 
 ---
 
