@@ -87,6 +87,15 @@ class Product(Base):
     partial_cases: Mapped[list | None] = mapped_column(JSON, nullable=True)
     last_stock_check: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    bottle_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Supplier order / debt tracking (cases ordered vs delivered, and money owed to supplier)
+    supplier_sent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    received_cases: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    remaining_to_receive: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    supplier_debt_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payments: Mapped[list | None] = mapped_column(JSON, nullable=True)  # supplier payment ledger
+    total_paid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    balance_due: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     sale_items: Mapped[list["SaleItem"]] = relationship(back_populates="product")
 
@@ -132,6 +141,7 @@ class Sale(Base):
     remaining_balance: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     empty_cases_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     remaining_empty_cases_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_deposit_value: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     cashier: Mapped[str] = mapped_column(String(120), nullable=False)
     payment_method: Mapped[str] = mapped_column(String(40), nullable=False)
     expected_empties: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

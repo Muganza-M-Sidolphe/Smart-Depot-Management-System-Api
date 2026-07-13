@@ -207,6 +207,7 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
     pending_empties = 0       # cases still owed after any returned at the sale
     returned_empties = 0      # cases returned right at the point of sale
     pending_deposit_value = 0.0
+    total_deposit_value = 0.0  # deposit value for all cases sold (returned or not)
 
     sale = Sale(
         receipt_no=f"RCP-{1001 + sale_count}",
@@ -227,6 +228,7 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
         returned_empties=0,
         empty_cases_total=0,
         remaining_empty_cases_total=0,
+        total_deposit_value=0,
         invoice_number=f"INV-{1001 + sale_count}",
         status="completed",
     )
@@ -245,6 +247,7 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
         pending_empties += pending_now
         returned_empties += returned_now
         pending_deposit_value += pending_now * product.deposit_amount
+        total_deposit_value += item.quantity * product.deposit_amount
         product.full_cases -= item.quantity
 
         db.add(
@@ -300,6 +303,7 @@ def create_sale(db: Session, payload: schema.SaleCreate) -> Sale:
     sale.returned_empties = returned_empties
     sale.empty_cases_total = returned_empties
     sale.remaining_empty_cases_total = pending_empties
+    sale.total_deposit_value = total_deposit_value
     sale.remaining_balance = remaining_balance
     sale.payment_status = (
         "paid" if remaining_balance <= 0 else ("unpaid" if amount_toward_sale <= 0 else "partial")

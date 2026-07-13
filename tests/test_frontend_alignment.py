@@ -53,6 +53,53 @@ async def test_product_persists_container_and_bottle_extras(client: AsyncClient)
 
 
 @pytest.mark.anyio
+async def test_product_persists_supplier_order_tracking(client: AsyncClient) -> None:
+    payload = {
+        **PRODUCT_PAYLOAD,
+        "bottleType": "grand",
+        "supplierSent": 100,
+        "receivedCases": 60,
+        "remainingToReceive": 40,
+        "supplierDebtValue": 480000,
+        "totalPaid": 300000,
+        "balanceDue": 900000,
+        "payments": [
+            {"id": "1", "amount": 300000, "casesPaid": 25, "paymentMethod": "bank_transfer"}
+        ],
+    }
+    created = (await client.post("/api/v1/products/", json=payload)).json()
+    assert created["supplierSent"] == 100
+    assert created["receivedCases"] == 60
+    assert created["remainingToReceive"] == 40
+    assert created["balanceDue"] == 900000
+    assert created["bottleType"] == "grand"
+    assert created["payments"][0]["amount"] == 300000
+
+    fetched = (await client.get(f"/api/v1/products/{created['id']}")).json()
+    assert fetched["supplierDebtValue"] == 480000
+    assert fetched["totalPaid"] == 300000
+
+
+@pytest.mark.anyio
+async def test_sale_returns_total_deposit_value(client: AsyncClient) -> None:
+    product = (await client.post("/api/v1/products/", json=PRODUCT_PAYLOAD)).json()  # deposit 3000
+    sale = (
+        await client.post(
+            "/api/v1/sales/",
+            json={
+                "customerName": "Walk-in",
+                "items": [{"productId": product["id"], "quantity": 5}],
+                "payment": "cash",
+                "amountPaid": 55000,
+                "cashier": "Eric",
+            },
+        )
+    ).json()
+    # 5 cases * 3000 deposit = 15000
+    assert sale["totalDepositValue"] == 15000
+
+
+@pytest.mark.anyio
 async def test_sale_applies_tax_partial_payment_and_empties_returned(client: AsyncClient) -> None:
     product = (await client.post("/api/v1/products/", json=PRODUCT_PAYLOAD)).json()
     customer = (

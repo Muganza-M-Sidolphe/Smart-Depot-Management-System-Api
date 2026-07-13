@@ -97,6 +97,15 @@ class ProductBase(APIModel):
     bottle_info: dict[str, Any] | None = None
     partial_cases: list[Any] | None = None
     last_stock_check: datetime | None = None
+    bottle_type: str | None = None
+    # Supplier order / debt tracking
+    supplier_sent: int | None = None
+    received_cases: int | None = None
+    remaining_to_receive: int | None = None
+    supplier_debt_value: float | None = None
+    payments: list[Any] | None = None
+    total_paid: float | None = None
+    balance_due: float | None = None
 
 
 class ProductCreate(ProductBase):
@@ -125,6 +134,14 @@ class ProductUpdate(APIModel):
     bottle_info: dict[str, Any] | None = None
     partial_cases: list[Any] | None = None
     last_stock_check: datetime | None = None
+    bottle_type: str | None = None
+    supplier_sent: int | None = None
+    received_cases: int | None = None
+    remaining_to_receive: int | None = None
+    supplier_debt_value: float | None = None
+    payments: list[Any] | None = None
+    total_paid: float | None = None
+    balance_due: float | None = None
 
 
 class ProductRead(ProductBase):
@@ -246,6 +263,7 @@ class SaleRead(APIModel):
     returned_empties: int
     empty_cases_total: int
     remaining_empty_cases_total: int
+    total_deposit_value: float
     invoice_number: str
     status: str
     payment_status: str
@@ -257,6 +275,7 @@ class SaleRead(APIModel):
         "remaining_balance",
         "empty_cases_total",
         "remaining_empty_cases_total",
+        "total_deposit_value",
         "is_partial_payment",
         "payment_status",
         mode="before",

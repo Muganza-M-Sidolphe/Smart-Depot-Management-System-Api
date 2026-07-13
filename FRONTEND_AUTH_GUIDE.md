@@ -379,10 +379,15 @@ The backend was extended so the fields the current forms send are **persisted**
 
 ### Products — `POST/PATCH /products/`
 In addition to the base product fields, these are now stored and returned:
-`containerType`, `containerSizeLabel`, `bottlesPerContainer`,
+`containerType`, `containerSizeLabel`, `bottleType`, `bottlesPerContainer`,
 `purchasePricePerContainer`, `sellingPricePerContainer`,
 `bottleInfo` (object `{damaged, missing, returned, notes}`),
 `partialCases` (array), `lastStockCheck`. Reads also return `updatedAt`.
+
+**Supplier order / debt tracking** (from the inventory "record stock" form) is now
+stored and returned too: `supplierSent`, `receivedCases`, `remainingToReceive`,
+`supplierDebtValue`, `payments` (array of supplier payment records), `totalPaid`,
+`balanceDue`. These are persisted as-is, so the inventory form round-trips fully.
 
 ### Sales — `POST /sales/`
 Now accepted and applied server-side (do **not** send computed totals — the
@@ -390,7 +395,7 @@ server calculates them):
 - `tax` — a **percentage** (e.g. `10` = 10%); the server computes the tax amount and adds it to `total`.
 - `isPartialPayment` (boolean) + optional `remainingBalance`. On a partial sale the unpaid amount is added to the customer's `unpaidBalance`.
 - Per line item: `emptyCasesReturned` (returned at the sale) and `remainingEmptyCases`.
-- The sale response now includes `tax`, `isPartialPayment`, `remainingBalance`, `emptyCasesTotal`, `remainingEmptyCasesTotal`, and per-item `emptyCasesReturned` / `remainingEmptyCases`.
+- The sale response now includes `tax`, `isPartialPayment`, `remainingBalance`, `emptyCasesTotal`, `remainingEmptyCasesTotal`, `totalDepositValue` (sum of deposits for all cases sold), and per-item `emptyCasesReturned` / `remainingEmptyCases`.
 
 Payment values: `cash`, `mobile`, `card`, `bank`.
 
